@@ -1,0 +1,181 @@
+# AI Data Marketplace Schema
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
+  passwordHash  String
+  role          UserRole @default(BUYER)
+  status        UserStatus @default(ACTIVE)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  datasets      Dataset[]
+  wallet        WalletAccount?
+  payouts       Payout[]
+  orders        Order[]
+}
+
+model WalletAccount {
+  id        String @id @default(cuid())
+  userId    String @unique
+  user      User   @relation(fields: [userId], references: [id])
+  balanceCents Int @default(0)
+  currency  String @default("USD")
+  status    WalletStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  transactions WalletTransaction[]
+  payouts   Payout[]
+}
+
+model Dataset {
+  id           String @id @default(cuid())
+  sellerId      String
+  seller        User @relation(fields: [sellerId], references: [id])
+  title        String
+  category     String
+  description  String
+  priceCents   Int
+  qualityScore Int
+  licenseType  LicenseType @default(COMMERCIAL)
+  sourceCount  Int @default(1)
+  status       DatasetStatus @default(PUBLISHED)
+  tags         String[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  listings     Listing[]
+  orders       Order[]
+}
+
+model Listing {
+  id            String @id @default(cuid())
+  datasetId     String
+  dataset       Dataset @relation(fields: [datasetId], references: [id])
+  slug          String @unique
+  priceCents    Int
+  currency      String @default("USD")
+  publishedAt   DateTime?
+  listingStatus ListingStatus @default(PUBLISHED)
+  createdAt     DateTime @default(now())
+  orders        Order[]
+}
+
+model Order {
+  id           String @id @default(cuid())
+  buyerId      String
+  buyer        User @relation(fields: [buyerId], references: [id])
+  datasetId    String
+  dataset      Dataset @relation(fields: [datasetId], references: [id])
+  listingId    String?
+  listing      Listing? @relation(fields: [listingId], references: [id])
+  totalCents   Int
+  currency     String @default("USD")
+  status       OrderStatus @default(PAID)
+  createdAt    DateTime @default(now())
+}
+
+model WalletTransaction {
+  id            String @id @default(cuid())
+  walletId      String
+  wallet        WalletAccount @relation(fields: [walletId], references: [id])
+  type          TransactionType
+  amountCents   Int
+  currency      String @default("USD")
+  status        TransactionStatus @default(COMPLETED)
+  referenceId   String?
+  createdAt     DateTime @default(now())
+}
+
+model Payout {
+  id                  String @id @default(cuid())
+  userId              String
+  user                User @relation(fields: [userId], references: [id])
+  walletAccountId     String
+  walletAccount       WalletAccount @relation(fields: [walletAccountId], references: [id])
+  amountCents         Int
+  method              PayoutMethod @default(BANK_TRANSFER)
+  destinationAccount  String
+  status              PayoutStatus @default(REQUESTED)
+  requestedAt         DateTime @default(now())
+  processedAt         DateTime?
+}
+
+enum UserRole {
+  BUYER
+  SELLER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  PENDING_VERIFICATION
+  SUSPENDED
+}
+
+enum WalletStatus {
+  ACTIVE
+  LOCKED
+}
+
+enum LicenseType {
+  COMMERCIAL
+  PERSONAL
+  ENTERPRISE
+  RESTRICTED
+}
+
+enum DatasetStatus {
+  DRAFT
+  REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ListingStatus {
+  DRAFT
+  PUBLISHED
+  HIDDEN
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+  FEE
+  PAYOUT
+  REFUND
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum PayoutMethod {
+  BANK_TRANSFER
+  WIRE
+  STRIPE
+}
+
+enum PayoutStatus {
+  REQUESTED
+  PROCESSING
+  APPROVED
+  COMPLETED
+  REJECTED
+}

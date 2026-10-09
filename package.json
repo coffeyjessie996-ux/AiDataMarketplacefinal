@@ -1,0 +1,18 @@
+{
+  "name": "ai-data-marketplace",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace @ai-data-marketplace/api\" \"npm run dev --workspace @ai-data-marketplace/web\"",
+    "build": "npm run build --workspace @ai-data-marketplace/api && npm run build --workspace @ai-data-marketplace/web",
+    "lint": "npm run lint --workspace @ai-data-marketplace/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
