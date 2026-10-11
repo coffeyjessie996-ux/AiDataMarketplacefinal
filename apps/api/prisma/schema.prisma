@@ -1,4 +1,4 @@
-# AI Data Marketplace Schema
+// AI Data Marketplace Schema
 
 datasource db {
   provider = "postgresql"

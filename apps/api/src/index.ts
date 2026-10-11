@@ -18,6 +18,14 @@ const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
 app.use(cors({ origin: allowedOrigin }));
 app.use(express.json());
 
+// The web app calls `/api/*` (rewritten to this service), while routes are defined without the prefix.
+app.use((req, _res, next) => {
+  if (req.url === '/api' || req.url.startsWith('/api/') || req.url.startsWith('/api?')) {
+    req.url = req.url.slice(4) || '/';
+  }
+  next();
+});
+
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-this-secret';
 
 function makeUserToken(userId: string) {
