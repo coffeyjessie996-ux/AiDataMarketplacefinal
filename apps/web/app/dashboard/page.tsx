@@ -28,33 +28,12 @@ type PayoutRow = {
   status: string;
 };
 
-const fallbackSnapshot: Snapshot = {
-  totalRevenueCents: 245000,
-  totalDatasets: 12,
-  activeOrders: 38,
-  pendingPayouts: 5,
-  platformLiquidityCents: 118500,
-};
-
-const fallbackDatasets: DatasetRow[] = [
-  { id: 'd1', title: 'Fintech Signals', category: 'Finance', status: 'published', priceCents: 6900, qualityScore: 96 },
-  { id: 'd2', title: 'SaaS Buyer Leads', category: 'B2B', status: 'published', priceCents: 5400, qualityScore: 92 },
-  { id: 'd3', title: 'Startup Hiring Trends', category: 'Market Research', status: 'review', priceCents: 7800, qualityScore: 88 },
-  { id: 'd4', title: 'E-commerce Inventory Index', category: 'Retail', status: 'draft', priceCents: 3200, qualityScore: 77 },
-];
-
-const fallbackPayouts: PayoutRow[] = [
-  { id: 'p1', amountCents: 24000, destinationAccount: '**** 4821', status: 'requested' },
-  { id: 'p2', amountCents: 16500, destinationAccount: '**** 2014', status: 'processing' },
-  { id: 'p3', amountCents: 9000, destinationAccount: '**** 6312', status: 'approved' },
-];
-
 export default function DashboardPage() {
-  const [snapshot, setSnapshot] = useState<Snapshot>(fallbackSnapshot);
-  const [datasets, setDatasets] = useState<DatasetRow[]>(fallbackDatasets);
-  const [payouts, setPayouts] = useState<PayoutRow[]>(fallbackPayouts);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [datasets, setDatasets] = useState<DatasetRow[]>([]);
+  const [payouts, setPayouts] = useState<PayoutRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [authState, setAuthState] = useState<'ready' | 'unauthenticated' | 'error'>('ready');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -62,7 +41,7 @@ export default function DashboardPage() {
         const token = window.localStorage.getItem('auth_token');
 
         if (!token) {
-          setAuthState('unauthenticated');
+          setError('Please sign in to view the dashboard.');
           setLoading(false);
           return;
         }
@@ -74,24 +53,19 @@ export default function DashboardPage() {
         });
 
         if (!response.ok) {
-          setAuthState('error');
+          setError('Unable to load dashboard data. Check your permissions.');
           setLoading(false);
           return;
         }
 
         const json = await response.json();
-        const nextSnapshot = json.snapshot ?? fallbackSnapshot;
-
-        setSnapshot({
-          ...fallbackSnapshot,
-          ...nextSnapshot,
-        });
-        setDatasets(json.datasets ?? fallbackDatasets);
-        setPayouts(json.payouts ?? fallbackPayouts);
-        setAuthState('ready');
+        setSnapshot(json.snapshot ?? null);
+        setDatasets(json.datasets ?? []);
+        setPayouts(json.payouts ?? []);
+        setError(null);
       } catch (error) {
         console.error('Failed to load dashboard data', error);
-        setAuthState('error');
+        setError('Failed to load dashboard. Please try again.');
       } finally {
         setLoading(false);
       }
@@ -136,107 +110,100 @@ export default function DashboardPage() {
           <div className="card empty-state">
             <p>Loading marketplace analytics...</p>
           </div>
+        ) : error ? (
+          <div className="card empty-state">
+            <p>{error}</p>
+          </div>
         ) : (
           <>
-            {authState !== 'ready' && (
+            {snapshot && (
+              <section className="metric-grid">
+                <div className="metric-box">
+                  <div className="metric-label">Gross revenue</div>
+                  <div className="metric-value">{formatMoney(snapshot.totalRevenueCents)}</div>
+                </div>
+                <div className="metric-box">
+                  <div className="metric-label">Datasets</div>
+                  <div className="metric-value">{snapshot.totalDatasets}</div>
+                </div>
+                <div className="metric-box">
+                  <div className="metric-label">Active orders</div>
+                  <div className="metric-value">{snapshot.activeOrders}</div>
+                </div>
+                <div className="metric-box">
+                  <div className="metric-label">Platform liquidity</div>
+                  <div className="metric-value">{formatMoney(snapshot.platformLiquidityCents)}</div>
+                </div>
+              </section>
+            )}
+
+            {datasets.length > 0 && (
               <div className="card" style={{ marginBottom: 24 }}>
-                <h3 className="card-title">
-                  {authState === 'unauthenticated' ? 'Demo mode active' : 'Unable to load live admin data'}
-                </h3>
-                <p style={{ margin: 0, color: '#cbd5e1', lineHeight: 1.6 }}>
-                  {authState === 'unauthenticated'
-                    ? 'Sign in with an admin account to access live revenue and payout data.'
-                    : 'The API rejected the request. Check the auth token and admin permissions.'}
-                </p>
+                <h3 className="card-title">Dataset performance</h3>
+
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Dataset</th>
+                        <th>Category</th>
+                        <th>Status</th>
+                        <th>Quality</th>
+                        <th>Price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {datasets.map((dataset) => (
+                        <tr key={dataset.id}>
+                          <td>{dataset.title}</td>
+                          <td>{dataset.category}</td>
+                          <td>
+                            <span className={`badge ${dataset.status === 'published' ? 'active' : dataset.status === 'review' ? 'pending' : 'paid'}`}>
+                              {dataset.status}
+                            </span>
+                          </td>
+                          <td>{dataset.qualityScore}/100</td>
+                          <td>{formatMoney(dataset.priceCents)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
-            <section className="metric-grid">
-              <div className="metric-box">
-                <div className="metric-label">Gross revenue</div>
-                <div className="metric-value">{formatMoney(snapshot.totalRevenueCents)}</div>
-                <div className="metric-trend">+12.4% vs last month</div>
-              </div>
-              <div className="metric-box">
-                <div className="metric-label">Datasets</div>
-                <div className="metric-value">{snapshot.totalDatasets}</div>
-                <div className="metric-trend">+3 new listings</div>
-              </div>
-              <div className="metric-box">
-                <div className="metric-label">Active orders</div>
-                <div className="metric-value">{snapshot.activeOrders}</div>
-                <div className="metric-trend">18 require attention</div>
-              </div>
-              <div className="metric-box">
-                <div className="metric-label">Platform liquidity</div>
-                <div className="metric-value">{formatMoney(snapshot.platformLiquidityCents)}</div>
-                <div className="metric-trend">{snapshot.pendingPayouts} pending payouts</div>
-              </div>
-            </section>
+            {payouts.length > 0 && (
+              <div className="card">
+                <h3 className="card-title">Recent payouts</h3>
 
-            <div className="card" style={{ marginBottom: 24 }}>
-              <h3 className="card-title">Dataset performance</h3>
-
-              <div className="table-container">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Dataset</th>
-                      <th>Category</th>
-                      <th>Status</th>
-                      <th>Quality</th>
-                      <th>Price</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {datasets.map((dataset) => (
-                      <tr key={dataset.id}>
-                        <td>{dataset.title}</td>
-                        <td>{dataset.category}</td>
-                        <td>
-                          <span className={`badge ${dataset.status === 'published' ? 'active' : dataset.status === 'review' ? 'pending' : 'paid'}`}>
-                            {dataset.status}
-                          </span>
-                        </td>
-                        <td>{dataset.qualityScore}/100</td>
-                        <td>{formatMoney(dataset.priceCents)}</td>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Amount</th>
+                        <th>Destination</th>
+                        <th>Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {payouts.map((payout) => (
+                        <tr key={payout.id}>
+                          <td>{payout.id}</td>
+                          <td>{formatMoney(payout.amountCents)}</td>
+                          <td>{payout.destinationAccount}</td>
+                          <td>
+                            <span className={`badge ${payout.status === 'approved' || payout.status === 'completed' ? 'active' : payout.status === 'processing' ? 'pending' : 'paid'}`}>
+                              {payout.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-
-            <div className="card">
-              <h3 className="card-title">Recent payouts</h3>
-
-              <div className="table-container">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Amount</th>
-                      <th>Destination</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {payouts.map((payout) => (
-                      <tr key={payout.id}>
-                        <td>{payout.id}</td>
-                        <td>{formatMoney(payout.amountCents)}</td>
-                        <td>{payout.destinationAccount}</td>
-                        <td>
-                          <span className={`badge ${payout.status === 'approved' || payout.status === 'completed' ? 'active' : payout.status === 'processing' ? 'pending' : 'paid'}`}>
-                            {payout.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            )}
           </>
         )}
       </main>
