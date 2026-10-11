@@ -1,3 +1,5 @@
+import './instrument';
+import * as Sentry from '@sentry/node';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
@@ -491,6 +493,14 @@ app.get('/admin/overview', requireAuth, requireRole(['admin']), async (_req, res
     payouts: payouts.map(serializePayout),
     users: users.map(({ passwordHash: _passwordHash, ...user }) => serializeUser(user as any)),
   });
+});
+
+Sentry.setupExpressErrorHandler(app);
+
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled API error', err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Internal server error.' });
 });
 
 export default app;
