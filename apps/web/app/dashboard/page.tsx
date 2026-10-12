@@ -421,7 +421,44 @@ function PayoutsTab({ formatMoney }: { formatMoney: (cents: number) => string })
 function AdminTab({ formatMoney }: { formatMoney: (cents: number) => string }) {
   const [overview, setOverview] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
+const [scraping, setScraping] = useState(false);
+const [scraperMessage, setScraperMessage] = useState('');
 
+const startScrapers = async () => {
+  setScraping(true);
+  setScraperMessage('');
+
+  try {
+    const token = localStorage.getItem('auth_token');
+
+    const res = await fetch(`${API}/scrapers/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        urls: [
+          'https://www.usa.gov/',
+        ],
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Scraper failed.');
+    }
+
+    setScraperMessage(`Scraped ${data.count} source(s) successfully.`);
+  } catch (error) {
+    setScraperMessage(
+      error instanceof Error ? error.message : 'Scraper failed.'
+    );
+  } finally {
+    setScraping(false);
+  }
+};
   useEffect(() => {
     const load = async () => {
       try {
