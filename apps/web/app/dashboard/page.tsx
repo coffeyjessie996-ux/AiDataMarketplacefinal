@@ -480,7 +480,19 @@ const startScrapers = async () => {
 
   return (
     <div>
-      <div className="metric-grid">
+      <div className="metric-grid"><div style={{ marginTop: '24px' }}>
+  <button
+    type="button"
+    onClick={startScrapers}
+    disabled={scraping}
+  >
+    {scraping ? 'Scraping...' : 'Start Scrapers'}
+  </button>
+
+  {scraperMessage && (
+    <p>{scraperMessage}</p>
+  )}
+</div>
         <div className="metric-box">
           <div className="metric-label">Total revenue</div>
           <div className="metric-value">{formatMoney(overview?.totalRevenueCents || 0)}</div>
