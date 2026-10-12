@@ -6,8 +6,33 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { z } from 'zod';
+import { z }app.post('/scrapers/start', requireAuth, async (req, res) => {
+  try {
+    const urls = Array.isArray(req.body?.urls)
+      ? req.body.urls.filter((url: unknown): url is string => typeof url === 'string')
+      : [];
 
+    if (urls.length === 0) {
+      return res.status(400).json({
+        error: 'Provide at least one URL to scrape.',
+      });
+    }
+
+    const results = await scrapeSources(urls);
+
+    return res.status(200).json({
+      success: true,
+      count: results.length,
+      results,
+    });
+  } catch (error) {
+    console.error('Scraper failed', error);
+    return res.status(500).json({
+      error: 'Scraper failed.',
+    });
+  }
+}); from'zod';Sentry.setupExpressErrorHandler(app);
+import { scrapeSources } from './services/scraper';
 import { prisma } from './lib/prisma';
 import { User } from './types';
 
