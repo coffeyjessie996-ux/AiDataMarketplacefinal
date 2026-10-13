@@ -9,7 +9,7 @@ export default function RegisterPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('user');
+  const [role, setRole] = useState('buyer');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -100,8 +100,9 @@ export default function RegisterPage() {
             onChange={(e) => setRole(e.target.value)}
             style={{ display: 'block', width: '100%', padding: '10px', marginTop: '6px' }}
           >
-            <option value="user">User</option>
-            <option value="contributor">Contributor</option>
+            <option value="buyer">Buyer</option>
+            <option value="seller">Seller</option>
+            <option value="admin">Admin</option>
           </select>
         </div>
 
