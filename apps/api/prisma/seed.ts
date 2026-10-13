@@ -1,54 +1,21 @@
-import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const demoPasswordHash = await bcrypt.hash('demo123', 12);
-  const platformPasswordHash = await bcrypt.hash('platform-secret', 12);
+  console.log('Running seed script...');
+
+  // Platform user (fixed id 'platform' so platform wallet can reference it)
+  const platformPassword = await bcrypt.hash('platform', 12);
   const platform = await prisma.user.upsert({
-    where: { email: 'platform@aidata.com' },
+    where: { id: 'platform' },
     update: {},
     create: {
-      name: 'Platform Treasury',
-      email: 'platform@aidata.com',
-      passwordHash: platformPasswordHash,
-      role: 'ADMIN',
-      status: 'ACTIVE',
-    },
-  });
-
-  const seller = await prisma.user.upsert({
-    where: { email: 'seller@aidata.com' },
-    update: {},
-    create: {
-      name: 'Ava Seller',
-      email: 'seller@aidata.com',
-      passwordHash: demoPasswordHash,
-      role: 'SELLER',
-      status: 'ACTIVE',
-    },
-  });
-
-  const buyer = await prisma.user.upsert({
-    where: { email: 'buyer@aidata.com' },
-    update: {},
-    create: {
-      name: 'Morgan Buyer',
-      email: 'buyer@aidata.com',
-      passwordHash: demoPasswordHash,
-      role: 'BUYER',
-      status: 'ACTIVE',
-    },
-  });
-
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@aidata.com' },
-    update: {},
-    create: {
-      name: 'Ops Admin',
-      email: 'admin@aidata.com',
-      passwordHash: demoPasswordHash,
+      id: 'platform',
+      name: 'Platform',
+      email: 'platform@local.test',
+      passwordHash: platformPassword,
       role: 'ADMIN',
       status: 'ACTIVE',
     },
@@ -56,118 +23,167 @@ async function main() {
 
   await prisma.walletAccount.upsert({
     where: { userId: platform.id },
-    update: { balanceCents: 1250000 },
+    update: {},
     create: {
       userId: platform.id,
-      balanceCents: 1250000,
+      balanceCents: 1000000,
       currency: 'USD',
       status: 'ACTIVE',
     },
   });
 
-  await prisma.walletAccount.upsert({
-    where: { userId: seller.id },
-    update: { balanceCents: 450000 },
+  // Admin user
+  const adminPasswordPlain = 'adminpass';
+  const adminPassword = await bcrypt.hash(adminPasswordPlain, 12);
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@local.test' },
+    update: {},
     create: {
-      userId: seller.id,
-      balanceCents: 450000,
-      currency: 'USD',
-      status: 'ACTIVE',
-    },
-  });
-
-  await prisma.walletAccount.upsert({
-    where: { userId: buyer.id },
-    update: { balanceCents: 240000 },
-    create: {
-      userId: buyer.id,
-      balanceCents: 240000,
-      currency: 'USD',
+      name: 'Admin User',
+      email: 'admin@local.test',
+      passwordHash: adminPassword,
+      role: 'ADMIN',
       status: 'ACTIVE',
     },
   });
 
   await prisma.walletAccount.upsert({
     where: { userId: admin.id },
-    update: { balanceCents: 780000 },
+    update: {},
     create: {
       userId: admin.id,
-      balanceCents: 780000,
+      balanceCents: 50000,
       currency: 'USD',
       status: 'ACTIVE',
     },
   });
 
-  const datasetOne = await prisma.dataset.upsert({
-    where: { id: 'dataset-1' },
+  // Seller user
+  const sellerPasswordPlain = 'sellerpass';
+  const sellerPassword = await bcrypt.hash(sellerPasswordPlain, 12);
+  const seller = await prisma.user.upsert({
+    where: { email: 'seller@local.test' },
     update: {},
     create: {
-      id: 'dataset-1',
+      name: 'Sample Seller',
+      email: 'seller@local.test',
+      passwordHash: sellerPassword,
+      role: 'SELLER',
+      status: 'ACTIVE',
+    },
+  });
+
+  await prisma.walletAccount.upsert({
+    where: { userId: seller.id },
+    update: {},
+    create: {
+      userId: seller.id,
+      balanceCents: 20000,
+      currency: 'USD',
+      status: 'ACTIVE',
+    },
+  });
+
+  // Buyer user
+  const buyerPasswordPlain = 'buyerpass';
+  const buyerPassword = await bcrypt.hash(buyerPasswordPlain, 12);
+  const buyer = await prisma.user.upsert({
+    where: { email: 'buyer@local.test' },
+    update: {},
+    create: {
+      name: 'Sample Buyer',
+      email: 'buyer@local.test',
+      passwordHash: buyerPassword,
+      role: 'BUYER',
+      status: 'ACTIVE',
+    },
+  });
+
+  await prisma.walletAccount.upsert({
+    where: { userId: buyer.id },
+    update: {},
+    create: {
+      userId: buyer.id,
+      balanceCents: 50000,
+      currency: 'USD',
+      status: 'ACTIVE',
+    },
+  });
+
+  // Create some sample datasets for the seller
+  const dataset1 = await prisma.dataset.create({
+    data: {
       sellerId: seller.id,
-      title: 'Global AI Hiring Signal Index',
-      category: 'talent-intelligence',
-      description: 'Normalized hiring trends across major markets and roles, updated weekly.',
-      priceCents: 29900,
-      qualityScore: 97,
+      title: 'US Small Business Leads (Sample)',
+      category: 'business',
+      description: 'A curated sample of small business contact data for market research and outreach.',
+      priceCents: 5000,
+      qualityScore: 87,
       licenseType: 'COMMERCIAL',
-      sourceCount: 18,
+      sourceCount: 3,
       status: 'PUBLISHED',
-      tags: ['hiring', 'ai', 'talent'],
+      tags: ['leads', 'business', 'usa'],
     },
   });
 
-  await prisma.dataset.upsert({
-    where: { id: 'dataset-2' },
-    update: {},
-    create: {
-      id: 'dataset-2',
+  const dataset2 = await prisma.dataset.create({
+    data: {
       sellerId: seller.id,
-      title: 'SaaS Pricing Benchmark Dataset',
-      category: 'market-research',
-      description: 'Structured pricing tables and positioning signals for software categories.',
-      priceCents: 39900,
-      qualityScore: 94,
-      licenseType: 'ENTERPRISE',
-      sourceCount: 26,
+      title: 'E-commerce Price History (Sample)',
+      category: 'ecommerce',
+      description: 'Historical pricing snapshots for popular consumer products (sample dataset).',
+      priceCents: 7500,
+      qualityScore: 92,
+      licenseType: 'COMMERCIAL',
+      sourceCount: 5,
       status: 'PUBLISHED',
-      tags: ['pricing', 'saas', 'benchmark'],
+      tags: ['pricing', 'ecommerce', 'history'],
     },
   });
 
-  await prisma.order.upsert({
-    where: { id: 'order-1' },
-    update: {},
-    create: {
-      id: 'order-1',
+  // Create an example order: buyer purchases dataset1
+  const order = await prisma.order.create({
+    data: {
       buyerId: buyer.id,
-      datasetId: datasetOne.id,
-      totalCents: 29900,
+      datasetId: dataset1.id,
+      totalCents: dataset1.priceCents,
       currency: 'USD',
       status: 'PAID',
     },
   });
 
-  await prisma.payout.upsert({
-    where: { id: 'payout-1' },
-    update: {},
-    create: {
-      id: 'payout-1',
-      userId: seller.id,
-      walletAccountId: (await prisma.walletAccount.findUniqueOrThrow({ where: { userId: seller.id } })).id,
-      amountCents: 125000,
-      method: 'BANK_TRANSFER',
-      destinationAccount: '**** 2847',
-      status: 'PROCESSING',
-    },
+  // Adjust wallets to reflect the purchase
+  // Deduct from buyer
+  await prisma.walletAccount.update({
+    where: { userId: buyer.id },
+    data: { balanceCents: { decrement: dataset1.priceCents } as any },
   });
+
+  // Credit seller (85%) and platform (15%)
+  const sellerShare = Math.round(dataset1.priceCents * 0.85);
+  const platformShare = dataset1.priceCents - sellerShare;
+
+  await prisma.walletAccount.update({
+    where: { userId: seller.id },
+    data: { balanceCents: { increment: sellerShare } as any },
+  });
+
+  await prisma.walletAccount.update({
+    where: { userId: platform.id },
+    data: { balanceCents: { increment: platformShare } as any },
+  });
+
+  console.log('Seed finished:');
+  console.log('  Admin:', { email: admin.email, password: adminPasswordPlain });
+  console.log('  Seller:', { email: seller.email, password: sellerPasswordPlain });
+  console.log('  Buyer:', { email: buyer.email, password: buyerPasswordPlain });
 }
 
 main()
-  .then(async () => {
-    await prisma.$disconnect();
-  })
-  .catch(async (e) => {
+  .catch((e) => {
     console.error(e);
-    await prisma.$disconnect();
     process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
   });
