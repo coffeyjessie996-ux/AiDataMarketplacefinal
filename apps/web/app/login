@@ -104,6 +104,10 @@ export default function LoginPage() {
           </p>
         )}
 
+        <p style={{ marginTop: '12px', marginBottom: '12px' }}>
+          Don't have an account? <a href="/register">Create one</a>
+        </p>
+
         <button
           type="submit"
           disabled={loading}
