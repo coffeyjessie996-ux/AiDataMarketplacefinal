@@ -1,3 +1,10 @@
+#!/usr/bin/env node
+
+if (process.env.SEED !== 'true') {
+  console.log('Seed script skipped. Set SEED=true to run it explicitly.');
+  process.exit(0);
+}
+
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
@@ -6,7 +13,6 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Running seed script...');
 
-  // Platform user (fixed id 'platform' so platform wallet can reference it)
   const platformPassword = await bcrypt.hash('platform', 12);
   const platform = await prisma.user.upsert({
     where: { id: 'platform' },
@@ -32,9 +38,7 @@ async function main() {
     },
   });
 
-  // Admin user
-  const adminPasswordPlain = 'adminpass';
-  const adminPassword = await bcrypt.hash(adminPasswordPlain, 12);
+  const adminPassword = await bcrypt.hash('adminpass', 12);
   const admin = await prisma.user.upsert({
     where: { email: 'admin@local.test' },
     update: {},
@@ -58,9 +62,7 @@ async function main() {
     },
   });
 
-  // Seller user
-  const sellerPasswordPlain = 'sellerpass';
-  const sellerPassword = await bcrypt.hash(sellerPasswordPlain, 12);
+  const sellerPassword = await bcrypt.hash('sellerpass', 12);
   const seller = await prisma.user.upsert({
     where: { email: 'seller@local.test' },
     update: {},
@@ -84,9 +86,7 @@ async function main() {
     },
   });
 
-  // Buyer user
-  const buyerPasswordPlain = 'buyerpass';
-  const buyerPassword = await bcrypt.hash(buyerPasswordPlain, 12);
+  const buyerPassword = await bcrypt.hash('buyerpass', 12);
   const buyer = await prisma.user.upsert({
     where: { email: 'buyer@local.test' },
     update: {},
@@ -110,7 +110,6 @@ async function main() {
     },
   });
 
-  // Create some sample datasets for the seller
   const dataset1 = await prisma.dataset.create({
     data: {
       sellerId: seller.id,
@@ -126,7 +125,7 @@ async function main() {
     },
   });
 
-  const dataset2 = await prisma.dataset.create({
+  await prisma.dataset.create({
     data: {
       sellerId: seller.id,
       title: 'E-commerce Price History (Sample)',
@@ -141,8 +140,7 @@ async function main() {
     },
   });
 
-  // Create an example order: buyer purchases dataset1
-  const order = await prisma.order.create({
+  await prisma.order.create({
     data: {
       buyerId: buyer.id,
       datasetId: dataset1.id,
@@ -152,14 +150,11 @@ async function main() {
     },
   });
 
-  // Adjust wallets to reflect the purchase
-  // Deduct from buyer
   await prisma.walletAccount.update({
     where: { userId: buyer.id },
     data: { balanceCents: { decrement: dataset1.priceCents } as any },
   });
 
-  // Credit seller (85%) and platform (15%)
   const sellerShare = Math.round(dataset1.priceCents * 0.85);
   const platformShare = dataset1.priceCents - sellerShare;
 
@@ -173,10 +168,9 @@ async function main() {
     data: { balanceCents: { increment: platformShare } as any },
   });
 
-  console.log('Seed finished:');
-  console.log('  Admin:', { email: admin.email, password: adminPasswordPlain });
-  console.log('  Seller:', { email: seller.email, password: sellerPasswordPlain });
-  console.log('  Buyer:', { email: buyer.email, password: buyerPasswordPlain });
+  console.log('Seed finished. Admin: admin@local.test / adminpass');
+  console.log('Seed finished. Seller: seller@local.test / sellerpass');
+  console.log('Seed finished. Buyer: buyer@local.test / buyerpass');
 }
 
 main()
