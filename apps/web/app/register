@@ -1,0 +1,120 @@
+page.tsx
+'use client';
+
+import { FormEvent, useState } from 'react';
+
+const API = process.env.NEXT_PUBLIC_API_URL || '/api';
+
+export default function RegisterPage() {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState('user');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function handleRegister(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${API}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password, role }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(
+          typeof data.error === 'string' ? data.error : 'Registration failed.'
+        );
+      }
+
+      // save token and go to dashboard
+      localStorage.setItem('auth_token', data.token);
+      window.location.href = '/dashboard';
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Registration failed.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main
+      style={{
+        maxWidth: '480px',
+        margin: '80px auto',
+        padding: '24px',
+      }}
+    >
+      <h1>AI Data Marketplace</h1>
+      <h2>Sign up</h2>
+
+      <form onSubmit={handleRegister}>
+        <div style={{ marginBottom: '12px' }}>
+          <label htmlFor="name">Name</label>
+          <input
+            id="name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            style={{ display: 'block', width: '100%', padding: '10px', marginTop: '6px' }}
+          />
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label htmlFor="email">Email</label>
+          <input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            style={{ display: 'block', width: '100%', padding: '10px', marginTop: '6px' }}
+          />
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={6}
+            style={{ display: 'block', width: '100%', padding: '10px', marginTop: '6px' }}
+          />
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label htmlFor="role">Role</label>
+          <select
+            id="role"
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            style={{ display: 'block', width: '100%', padding: '10px', marginTop: '6px' }}
+          >
+            <option value="user">User</option>
+            <option value="contributor">Contributor</option>
+          </select>
+        </div>
+
+        {error && <p style={{ marginBottom: '12px', color: 'crimson' }}>{error}</p>}
+
+        <button
+          type="submit"
+          disabled={loading}
+          style={{ width: '100%', padding: '12px', cursor: loading ? 'wait' : 'pointer' }}
+        >
+          {loading ? 'Signing up...' : 'Sign up'}
+        </button>
+      </form>
+    </main>
+  );
+}
