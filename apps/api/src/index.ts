@@ -6,32 +6,8 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { z }app.post('/scrapers/start', requireAuth, async (req, res) => {
-  try {
-    const urls = Array.isArray(req.body?.urls)
-      ? req.body.urls.filter((url: unknown): url is string => typeof url === 'string')
-      : [];
+import { z } from 'zod';
 
-    if (urls.length === 0) {
-      return res.status(400).json({
-        error: 'Provide at least one URL to scrape.',
-      });
-    }
-
-    const results = await scrapeSources(urls);
-
-    return res.status(200).json({
-      success: true,
-      count: results.length,
-      results,
-    });
-  } catch (error) {
-    console.error('Scraper failed', error);
-    return res.status(500).json({
-      error: 'Scraper failed.',
-    });
-  }
-}); from'zod';Sentry.setupExpressErrorHandler(app);
 import { scrapeSources } from './services/scraper';
 import { prisma } from './lib/prisma';
 import { User } from './types';
@@ -61,7 +37,7 @@ function makeUserToken(userId: string) {
 
 function decodeUserToken(token: string) {
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET) as any;
     return typeof payload === 'object' && typeof payload.sub === 'string' ? payload.sub : null;
   } catch {
     return null;
@@ -210,7 +186,9 @@ const datasetSchema = z.object({
   description: z.string().min(20),
   priceCents: z.number().int().positive(),
   qualityScore: z.number().int().min(0).max(100),
-  licenseType: z.enum(['commercial', 'personal', 'enterprise', 'restricted']).default('commercial'),
+  licenseType: z
+    .enum(['commercial', 'personal', 'enterprise', 'restricted'])
+    .default('commercial'),
   sourceCount: z.number().int().min(1).default(1),
   tags: z.array(z.string()).default([]),
   status: z.enum(['draft', 'review', 'published', 'archived']).default('published'),
@@ -244,7 +222,7 @@ app.post('/auth/register', async (req, res) => {
         name,
         email: email.toLowerCase(),
         passwordHash: await bcrypt.hash(password, 12),
-        role: role.toUpperCase() as 'BUYER',
+        role: role.toUpperCase() as any,
         status: 'ACTIVE',
       },
     });
@@ -360,6 +338,34 @@ app.post('/datasets', requireAuth, requireRole(['seller', 'admin']), async (req,
   });
 
   return res.status(201).json({ dataset: serializeDataset(dataset) });
+});
+
+// Scraper endpoint - accepts array of URLs and returns scraped snippets
+app.post('/scrapers/start', requireAuth, async (req, res) => {
+  try {
+    const urls = Array.isArray(req.body?.urls)
+      ? req.body.urls.filter((url: unknown): url is string => typeof url === 'string')
+      : [];
+
+    if (urls.length === 0) {
+      return res.status(400).json({
+        error: 'Provide at least one URL to scrape.',
+      });
+    }
+
+    const results = await scrapeSources(urls);
+
+    return res.status(200).json({
+      success: true,
+      count: results.length,
+      results,
+    });
+  } catch (error) {
+    console.error('Scraper failed', error);
+    return res.status(500).json({
+      error: 'Scraper failed.',
+    });
+  }
 });
 
 app.get('/wallet', requireAuth, async (req, res) => {
@@ -480,7 +486,16 @@ app.post('/orders', requireAuth, async (req, res) => {
 });
 
 app.get('/admin/overview', requireAuth, requireRole(['admin']), async (_req, res) => {
-  const [datasets, orders, payouts, users, totalRevenue, activeOrders, pendingPayouts, platformLiquidity] = await Promise.all([
+  const [
+    datasets,
+    orders,
+    payouts,
+    users,
+    totalRevenue,
+    activeOrders,
+    pendingPayouts,
+    platformLiquidity,
+  ] = await Promise.all([
     prisma.dataset.findMany({ orderBy: { createdAt: 'desc' } }),
     prisma.order.findMany({ orderBy: { createdAt: 'desc' } }),
     prisma.payout.findMany({ orderBy: { requestedAt: 'desc' } }),
