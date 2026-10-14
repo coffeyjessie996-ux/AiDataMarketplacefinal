@@ -290,8 +290,8 @@ app.get('/auth/me', requireAuth, async (req, res) => {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
-      status: user.status,
+      role: (user.role as string).toLowerCase(),
+      status: (user.status as string).toLowerCase(),
     },
     wallet: wallet ? serializeWallet(wallet) : null,
   });
