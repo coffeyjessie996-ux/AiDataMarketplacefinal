@@ -39,3 +39,5 @@ jobs:
     - name: AI Auto Code Review
       uses: iandis/ai-code-review@v1.0.1
   
+    - name: Vercel Action
+      uses: amondnet/vercel-action@v42.3.0
