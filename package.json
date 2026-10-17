@@ -3,5 +3,8 @@
     "dev": "concurrently \"pnpm --filter @ai-data-marketplace/api dev\" \"pnpm --filter @ai-data-marketplace/web dev\"",
     "build": "pnpm --filter @ai-data-marketplace/api build && pnpm --filter @ai-data-marketplace/web build",
     "lint": "pnpm --filter @ai-data-marketplace/web lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
   }
 }
