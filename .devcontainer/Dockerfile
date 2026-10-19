@@ -14,3 +14,4 @@ WORKDIR /workspace
 # Ensure pnpm is available
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
+gitlab-runner register  --url https://gitlab.com  --token glrt-we2Yr4u-I7ZvpFgncEb9wWM6MQpnOjJlZWRqbgpvOjEKdDoyCnU6cHc3YjAc.01.1o0lura0v
