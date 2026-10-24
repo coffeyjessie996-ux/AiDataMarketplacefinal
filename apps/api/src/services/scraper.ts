@@ -77,13 +77,27 @@ function validatePublicHttpUrl(rawUrl: string): URL {
 }
 
 function decodeBasicEntities(value: string): string {
-  return value
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, '‹')
-    .replace(/&gt;/gi, '›');
+  // Decode entities in a single pass so &amp;lt; cannot become a new
+  // entity delimiter and then be decoded a second time.
+  return value.replace(/&(?:nbsp|amp|quot|lt|gt);|&#39;|&apos;/gi, (entity) => {
+    switch (entity.toLowerCase()) {
+      case '&nbsp;':
+        return ' ';
+      case '&amp;':
+        return '&';
+      case '&quot;':
+        return '"';
+      case '&#39;':
+      case '&apos;':
+        return "'";
+      case '&lt;':
+        return '‹';
+      case '&gt;':
+        return '›';
+      default:
+        return entity;
+    }
+  });
 }
 
 async function readLimitedText(response: Response): Promise<string> {
