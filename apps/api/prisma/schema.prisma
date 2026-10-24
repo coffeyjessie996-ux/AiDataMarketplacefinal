@@ -94,6 +94,23 @@ model WalletTransaction {
   createdAt     DateTime @default(now())
 }
 
+model SupplierResearchRecord {
+  id             String   @id @default(cuid())
+  source         String
+  sourceRecordId String
+  supplierName   String?
+  awardAmount    Decimal? @db.Decimal(18, 2)
+  sourceUrl      String
+  payload        Json
+  retrievedAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([source, sourceRecordId])
+  @@index([supplierName])
+  @@index([retrievedAt])
+}
+
 model Payout {
   id                  String @id @default(cuid())
   userId              String

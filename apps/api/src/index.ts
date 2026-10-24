@@ -177,7 +177,7 @@ const registerSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(6),
-  role: z.enum(['buyer', 'seller', 'admin']).default('buyer'),
+  role: z.enum(['buyer', 'seller']).default('buyer'),
 });
 
 const datasetSchema = z.object({
@@ -352,6 +352,11 @@ app.post('/scrapers/start', requireAuth, async (req, res) => {
         error: 'Provide at least one URL to scrape.',
       });
     }
+    if (urls.length > 20) {
+      return res.status(400).json({
+        error: 'Submit no more than 20 URLs per request.',
+      });
+    }
 
     const results = await scrapeSources(urls);
 
@@ -368,6 +373,152 @@ app.post('/scrapers/start', requireAuth, async (req, res) => {
   }
 });
 
+
+// Public-source supplier intelligence: US federal contract awards from USAspending.gov.
+// Results retain the official source URL and retrieval timestamp; this endpoint does not
+// claim that records are independently verified or that a sale has occurred.
+app.get('/research/suppliers/federal-awards', requireAuth, async (req, res) => {
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const today = new Date();
+  const defaultEnd = today.toISOString().slice(0, 10);
+  const defaultStartDate = new Date(today);
+  defaultStartDate.setUTCDate(defaultStartDate.getUTCDate() - 90);
+  const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : defaultStartDate.toISOString().slice(0, 10);
+  const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : defaultEnd;
+  const requestedLimit = Number(req.query.limit ?? 50);
+  const limit = Number.isInteger(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 50;
+
+  if (!datePattern.test(startDate) || !datePattern.test(endDate) || startDate > endDate) {
+    return res.status(400).json({ error: 'Use valid YYYY-MM-DD startDate and endDate values, with startDate no later than endDate.' });
+  }
+
+  try {
+    const response = await fetch('https://api.usaspending.gov/api/v2/search/spending_by_award/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({
+        filters: {
+          time_period: [{ start_date: startDate, end_date: endDate }],
+          award_type_codes: ['A', 'B', 'C', 'D'],
+        },
+        fields: [
+          'Award ID', 'Recipient Name', 'Award Amount', 'Start Date', 'End Date',
+          'Awarding Agency', 'Description', 'Place of Performance State Code', 'NAICS', 'Recipient UEI',
+        ],
+        page: 1,
+        limit,
+        sort: 'Award Amount',
+        order: 'desc',
+      }),
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({ error: 'USAspending.gov returned an error.', sourceStatus: response.status });
+    }
+
+    const payload = await response.json() as { results?: Array<Record<string, unknown>>; page_metadata?: unknown };
+    const sourceValue = (row: Record<string, unknown>, label: string, normalized: string) => row[label] ?? row[normalized] ?? null;
+    const retrievedAt = new Date().toISOString();
+    const records = (Array.isArray(payload.results) ? payload.results : []).map((row) => ({
+      awardId: sourceValue(row, 'Award ID', 'award_id'),
+      supplierName: sourceValue(row, 'Recipient Name', 'recipient_name'),
+      awardAmount: sourceValue(row, 'Award Amount', 'award_amount'),
+      startDate: sourceValue(row, 'Start Date', 'start_date'),
+      endDate: sourceValue(row, 'End Date', 'end_date'),
+      awardingAgency: sourceValue(row, 'Awarding Agency', 'awarding_agency_name'),
+      description: sourceValue(row, 'Description', 'description'),
+      performanceState: sourceValue(row, 'Place of Performance State Code', 'place_of_performance_state_code'),
+      naics: sourceValue(row, 'NAICS', 'naics'),
+      supplierUei: sourceValue(row, 'Recipient UEI', 'recipient_uei'),
+      sourceUrl: 'https://www.usaspending.gov/',
+      retrievedAt,
+    }));
+
+    let persistedCount = 0;
+    for (const record of records) {
+      const sourceRecordId = String(record.awardId ?? '').trim();
+      if (!sourceRecordId) continue;
+
+      const amount = Number(record.awardAmount);
+      await prisma.supplierResearchRecord.upsert({
+        where: {
+          source_sourceRecordId: {
+            source: 'usaspending.gov',
+            sourceRecordId,
+          },
+        },
+        create: {
+          source: 'usaspending.gov',
+          sourceRecordId,
+          supplierName: typeof record.supplierName === 'string' ? record.supplierName : null,
+          awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
+          sourceUrl: String(record.sourceUrl),
+          payload: record as any,
+          retrievedAt: new Date(retrievedAt),
+        },
+        update: {
+          supplierName: typeof record.supplierName === 'string' ? record.supplierName : null,
+          awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
+          sourceUrl: String(record.sourceUrl),
+          payload: record as any,
+          retrievedAt: new Date(retrievedAt),
+        },
+      });
+      persistedCount += 1;
+    }
+
+    return res.json({
+      source: 'USAspending.gov',
+      sourceUrl: 'https://api.usaspending.gov/api/v2/search/spending_by_award/',
+      retrievedAt,
+      dateRange: { startDate, endDate },
+      count: records.length,
+      persistedCount,
+      records,
+      note: 'Public federal award data for supplier research. Check the source record before making commercial decisions; results are not independently verified and are not saved as a marketplace product by this endpoint.',
+    });
+  } catch (error) {
+    console.error('USAspending supplier research failed', error);
+    return res.status(502).json({ error: 'Unable to retrieve supplier records from USAspending.gov right now.' });
+  }
+});
+
+app.get('/research/suppliers/federal-awards/saved', requireAuth, async (req, res) => {
+  const requestedLimit = Number(req.query.limit ?? 50);
+  const limit = Number.isInteger(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 50;
+  const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+
+  try {
+    const records = await prisma.supplierResearchRecord.findMany({
+      where: {
+        source: 'usaspending.gov',
+        ...(search ? { supplierName: { contains: search, mode: 'insensitive' as const } } : {}),
+      },
+      orderBy: { retrievedAt: 'desc' },
+      take: limit,
+    });
+
+    return res.json({
+      source: 'USAspending.gov',
+      count: records.length,
+      records: records.map((record) => ({
+        id: record.id,
+        source: record.source,
+        sourceRecordId: record.sourceRecordId,
+        supplierName: record.supplierName,
+        awardAmount: record.awardAmount?.toString() ?? null,
+        sourceUrl: record.sourceUrl,
+        payload: record.payload,
+        retrievedAt: record.retrievedAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('Saved supplier research lookup failed', error);
+    return res.status(500).json({ error: 'Unable to read saved supplier records.' });
+  }
+});
+
 app.get('/wallet', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
   if (!user) return res.status(404).json({ error: 'User not found.' });
@@ -376,112 +527,18 @@ app.get('/wallet', requireAuth, async (req, res) => {
   return res.json({ wallet: wallet ? serializeWallet(wallet) : null });
 });
 
-app.post('/wallet/payout', requireAuth, async (req, res) => {
-  const parsed = payoutSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-
-  const user = (req as express.Request & { user?: User }).user;
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-
-  const wallet = await prisma.walletAccount.findUnique({ where: { userId: user.id } });
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found.' });
-  if (wallet.balanceCents < parsed.data.amountCents) {
-    return res.status(400).json({ error: 'Insufficient wallet balance.' });
-  }
-
-  const updatedWallet = await prisma.walletAccount.update({
-    where: { id: wallet.id },
-    data: { balanceCents: wallet.balanceCents - parsed.data.amountCents },
-  });
-
-  const payout = await prisma.payout.create({
-    data: {
-      userId: user.id,
-      walletAccountId: wallet.id,
-      amountCents: parsed.data.amountCents,
-      method: parsed.data.method.toUpperCase() as any,
-      destinationAccount: parsed.data.destinationAccount,
-      status: 'REQUESTED',
-    },
-  });
-
-  return res.status(201).json({
-    payout: serializePayout(payout),
-    wallet: serializeWallet(updatedWallet),
+app.post('/wallet/payout', requireAuth, async (_req, res) => {
+  // Payout integrations are currently simulated. Do not debit wallets or imply money will be sent.
+  return res.status(503).json({
+    error: 'Payouts are not enabled yet. A verified payout provider integration is required.',
   });
 });
 
-app.post('/orders', requireAuth, async (req, res) => {
-  const schema = z.object({ datasetId: z.string() });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-
-  const user = (req as express.Request & { user?: User }).user;
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-
-  const dataset = await prisma.dataset.findUnique({ where: { id: parsed.data.datasetId } });
-  if (!dataset) return res.status(404).json({ error: 'Dataset not found.' });
-  if (dataset.sellerId === user.id) {
-    return res.status(400).json({ error: 'Sellers cannot buy their own dataset.' });
-  }
-
-  const buyerWallet = await prisma.walletAccount.findUnique({ where: { userId: user.id } });
-  if (!buyerWallet || buyerWallet.balanceCents < dataset.priceCents) {
-    return res.status(400).json({ error: 'Buyer wallet balance is insufficient.' });
-  }
-
-  const sellerWallet = await prisma.walletAccount.findUnique({ where: { userId: dataset.sellerId } });
-  const platformWallet = await prisma.walletAccount.findFirst({ where: { userId: 'platform' } });
-
-  const sellerShare = Math.round(dataset.priceCents * 0.85);
-  const platformShare = dataset.priceCents - sellerShare;
-
-  const updatedBuyerWallet = await prisma.walletAccount.update({
-    where: { id: buyerWallet.id },
-    data: { balanceCents: buyerWallet.balanceCents - dataset.priceCents },
-  });
-
-  if (sellerWallet) {
-    await prisma.walletAccount.update({
-      where: { id: sellerWallet.id },
-      data: { balanceCents: sellerWallet.balanceCents + sellerShare },
-    });
-  }
-
-  if (platformWallet) {
-    await prisma.walletAccount.update({
-      where: { id: platformWallet.id },
-      data: { balanceCents: platformWallet.balanceCents + platformShare },
-    });
-  }
-
-  const order = await prisma.order.create({
-    data: {
-      buyerId: user.id,
-      datasetId: dataset.id,
-      totalCents: dataset.priceCents,
-      currency: 'USD',
-      status: 'PAID',
-    },
-  });
-
-  return res.status(201).json({
-    order: {
-      id: order.id,
-      buyerId: order.buyerId,
-      datasetId: order.datasetId,
-      totalCents: order.totalCents,
-      currency: order.currency,
-      status: order.status.toLowerCase(),
-      createdAt: order.createdAt.toISOString(),
-    },
-    buyerWallet: serializeWallet(updatedBuyerWallet),
-    sellerWallet: sellerWallet ? serializeWallet(sellerWallet) : null,
-    platformWallet: platformWallet ? serializeWallet(platformWallet) : null,
+app.post('/orders', requireAuth, async (_req, res) => {
+  // The current wallet flow is not backed by a verified payment processor.
+  // Block it rather than recording an order as PAID without a real payment.
+  return res.status(503).json({
+    error: 'Checkout is not enabled yet. A verified payment integration is required before purchases can be completed.',
   });
 });
 

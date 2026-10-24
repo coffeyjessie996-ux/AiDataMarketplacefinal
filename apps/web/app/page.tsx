@@ -67,6 +67,7 @@ export default function HomePage() {
             <a href="#catalog">Catalog</a>
             <a href="#automation">Automation</a>
             <a href="#money">Revenue</a>
+            <a href="/suppliers">Supplier research</a>
           </div>
           <a href="/dashboard" className="primary-button">Open dashboard</a>
         </nav>
