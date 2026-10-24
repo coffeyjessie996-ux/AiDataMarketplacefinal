@@ -171,9 +171,9 @@ export async function scrapeSources(inputUrls: string[]) {
       const text = decodeBasicEntities(
         html
           .replace(/<!--[\s\S]*?-->/g, ' ')
-          .replace(/<script\\b[\\s\\S]*?<\\/script(?:\\s+[^>]*)?\\s*>/gi, ' ')
-          .replace(/<style\\b[\\s\\S]*?<\\/style(?:\\s+[^>]*)?\\s*>/gi, ' ')
-          .replace(/<noscript\\b[\\s\\S]*?<\\/noscript(?:\\s+[^>]*)?\\s*>/gi, ' ')
+          .replace(/<script\b[\s\S]*?<\/script(?:\s+[^>]*)?\s*>/gi, ' ')
+          .replace(/<style\b[\s\S]*?<\/style(?:\s+[^>]*)?\s*>/gi, ' ')
+          .replace(/<noscript\b[\s\S]*?<\/noscript(?:\s+[^>]*)?\s*>/gi, ' ')
           .replace(/<[^>]+>/g, ' ')
           .replace(/\s+/g, ' ')
           .trim(),
