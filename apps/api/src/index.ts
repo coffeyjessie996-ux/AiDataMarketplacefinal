@@ -484,6 +484,41 @@ app.get('/research/suppliers/federal-awards', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/research/suppliers/federal-awards/saved', requireAuth, async (req, res) => {
+  const requestedLimit = Number(req.query.limit ?? 50);
+  const limit = Number.isInteger(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 50;
+  const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+
+  try {
+    const records = await prisma.supplierResearchRecord.findMany({
+      where: {
+        source: 'usaspending.gov',
+        ...(search ? { supplierName: { contains: search, mode: 'insensitive' as const } } : {}),
+      },
+      orderBy: { retrievedAt: 'desc' },
+      take: limit,
+    });
+
+    return res.json({
+      source: 'USAspending.gov',
+      count: records.length,
+      records: records.map((record) => ({
+        id: record.id,
+        source: record.source,
+        sourceRecordId: record.sourceRecordId,
+        supplierName: record.supplierName,
+        awardAmount: record.awardAmount?.toString() ?? null,
+        sourceUrl: record.sourceUrl,
+        payload: record.payload,
+        retrievedAt: record.retrievedAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('Saved supplier research lookup failed', error);
+    return res.status(500).json({ error: 'Unable to read saved supplier records.' });
+  }
+});
+
 app.get('/wallet', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
   if (!user) return res.status(404).json({ error: 'User not found.' });
