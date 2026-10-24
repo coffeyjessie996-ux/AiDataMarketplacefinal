@@ -36,8 +36,11 @@ jobs:
     - name: Build web
       run: pnpm --filter @ai-data-marketplace/web run build
     
-    - name: AI Auto Code Review
+        - name: AI Auto Code Review
       uses: iandis/ai-code-review@v1.0.1
+      with:
+        repo: ${{ github.repository }}
+
   
     - name: Vercel Action
       uses: amondnet/vercel-action@v42.3.0
