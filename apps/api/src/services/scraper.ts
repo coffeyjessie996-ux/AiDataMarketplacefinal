@@ -82,8 +82,8 @@ function decodeBasicEntities(value: string): string {
     .replace(/&amp;/gi, '&')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>');
+    .replace(/&lt;/gi, '‹')
+    .replace(/&gt;/gi, '›');
 }
 
 async function readLimitedText(response: Response): Promise<string> {
