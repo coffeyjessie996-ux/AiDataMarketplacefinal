@@ -373,6 +373,86 @@ app.post('/scrapers/start', requireAuth, async (req, res) => {
   }
 });
 
+
+// Public-source supplier intelligence: US federal contract awards from USAspending.gov.
+// Results retain the official source URL and retrieval timestamp; this endpoint does not
+// claim that records are independently verified or that a sale has occurred.
+app.get('/research/suppliers/federal-awards', requireAuth, async (req, res) => {
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const today = new Date();
+  const defaultEnd = today.toISOString().slice(0, 10);
+  const defaultStartDate = new Date(today);
+  defaultStartDate.setUTCDate(defaultStartDate.getUTCDate() - 90);
+  const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : defaultStartDate.toISOString().slice(0, 10);
+  const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : defaultEnd;
+  const requestedLimit = Number(req.query.limit ?? 50);
+  const limit = Number.isInteger(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 50;
+
+  if (!datePattern.test(startDate) || !datePattern.test(endDate) || startDate > endDate) {
+    return res.status(400).json({ error: 'Use valid YYYY-MM-DD startDate and endDate values, with startDate no later than endDate.' });
+  }
+
+  try {
+    const response = await fetch('https://api.usaspending.gov/api/v2/search/spending_by_award/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({
+        filters: {
+          time_period: [{ start_date: startDate, end_date: endDate }],
+          award_type_codes: ['A', 'B', 'C', 'D'],
+        },
+        fields: [
+          'Award ID', 'Recipient Name', 'Award Amount', 'Start Date', 'End Date',
+          'Awarding Agency', 'Description', 'Place of Performance City Name',
+          'Place of Performance State Code', 'NAICS Code', 'NAICS Description', 'Recipient UEI',
+        ],
+        page: 1,
+        limit,
+        sort: 'Award Amount',
+        order: 'desc',
+      }),
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({ error: 'USAspending.gov returned an error.', sourceStatus: response.status });
+    }
+
+    const payload = await response.json() as { results?: Array<Record<string, unknown>>; page_metadata?: unknown };
+    const sourceValue = (row: Record<string, unknown>, label: string, normalized: string) => row[label] ?? row[normalized] ?? null;
+    const retrievedAt = new Date().toISOString();
+    const records = (Array.isArray(payload.results) ? payload.results : []).map((row) => ({
+      awardId: sourceValue(row, 'Award ID', 'award_id'),
+      supplierName: sourceValue(row, 'Recipient Name', 'recipient_name'),
+      awardAmount: sourceValue(row, 'Award Amount', 'award_amount'),
+      startDate: sourceValue(row, 'Start Date', 'start_date'),
+      endDate: sourceValue(row, 'End Date', 'end_date'),
+      awardingAgency: sourceValue(row, 'Awarding Agency', 'awarding_agency_name'),
+      description: sourceValue(row, 'Description', 'description'),
+      performanceCity: sourceValue(row, 'Place of Performance City Name', 'place_of_performance_city_name'),
+      performanceState: sourceValue(row, 'Place of Performance State Code', 'place_of_performance_state_code'),
+      naicsCode: sourceValue(row, 'NAICS Code', 'naics_code'),
+      naicsDescription: sourceValue(row, 'NAICS Description', 'naics_description'),
+      supplierUei: sourceValue(row, 'Recipient UEI', 'recipient_uei'),
+      sourceUrl: 'https://www.usaspending.gov/',
+      retrievedAt,
+    }));
+
+    return res.json({
+      source: 'USAspending.gov',
+      sourceUrl: 'https://api.usaspending.gov/api/v2/search/spending_by_award/',
+      retrievedAt,
+      dateRange: { startDate, endDate },
+      count: records.length,
+      records,
+      note: 'Public federal award data for supplier research. Check the source record before making commercial decisions; results are not independently verified and are not saved as a marketplace product by this endpoint.',
+    });
+  } catch (error) {
+    console.error('USAspending supplier research failed', error);
+    return res.status(502).json({ error: 'Unable to retrieve supplier records from USAspending.gov right now.' });
+  }
+});
+
 app.get('/wallet', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
   if (!user) return res.status(404).json({ error: 'User not found.' });
