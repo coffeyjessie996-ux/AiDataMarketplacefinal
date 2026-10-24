@@ -177,7 +177,7 @@ const registerSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(6),
-  role: z.enum(['buyer', 'seller', 'admin']).default('buyer'),
+  role: z.enum(['buyer', 'seller']).default('buyer'),
 });
 
 const datasetSchema = z.object({
