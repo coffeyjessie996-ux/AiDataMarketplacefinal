@@ -435,12 +435,46 @@ app.get('/research/suppliers/federal-awards', requireAuth, async (req, res) => {
       retrievedAt,
     }));
 
+    let persistedCount = 0;
+    for (const record of records) {
+      const sourceRecordId = String(record.awardId ?? '').trim();
+      if (!sourceRecordId) continue;
+
+      const amount = Number(record.awardAmount);
+      await prisma.supplierResearchRecord.upsert({
+        where: {
+          source_sourceRecordId: {
+            source: 'usaspending.gov',
+            sourceRecordId,
+          },
+        },
+        create: {
+          source: 'usaspending.gov',
+          sourceRecordId,
+          supplierName: typeof record.supplierName === 'string' ? record.supplierName : null,
+          awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
+          sourceUrl: String(record.sourceUrl),
+          payload: record as any,
+          retrievedAt: new Date(retrievedAt),
+        },
+        update: {
+          supplierName: typeof record.supplierName === 'string' ? record.supplierName : null,
+          awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
+          sourceUrl: String(record.sourceUrl),
+          payload: record as any,
+          retrievedAt: new Date(retrievedAt),
+        },
+      });
+      persistedCount += 1;
+    }
+
     return res.json({
       source: 'USAspending.gov',
       sourceUrl: 'https://api.usaspending.gov/api/v2/search/spending_by_award/',
       retrievedAt,
       dateRange: { startDate, endDate },
       count: records.length,
+      persistedCount,
       records,
       note: 'Public federal award data for supplier research. Check the source record before making commercial decisions; results are not independently verified and are not saved as a marketplace product by this endpoint.',
     });
