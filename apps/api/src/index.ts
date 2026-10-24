@@ -352,6 +352,11 @@ app.post('/scrapers/start', requireAuth, async (req, res) => {
         error: 'Provide at least one URL to scrape.',
       });
     }
+    if (urls.length > 20) {
+      return res.status(400).json({
+        error: 'Submit no more than 20 URLs per request.',
+      });
+    }
 
     const results = await scrapeSources(urls);
 
