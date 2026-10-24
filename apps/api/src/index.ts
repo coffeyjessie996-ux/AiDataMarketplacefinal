@@ -376,112 +376,18 @@ app.get('/wallet', requireAuth, async (req, res) => {
   return res.json({ wallet: wallet ? serializeWallet(wallet) : null });
 });
 
-app.post('/wallet/payout', requireAuth, async (req, res) => {
-  const parsed = payoutSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-
-  const user = (req as express.Request & { user?: User }).user;
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-
-  const wallet = await prisma.walletAccount.findUnique({ where: { userId: user.id } });
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found.' });
-  if (wallet.balanceCents < parsed.data.amountCents) {
-    return res.status(400).json({ error: 'Insufficient wallet balance.' });
-  }
-
-  const updatedWallet = await prisma.walletAccount.update({
-    where: { id: wallet.id },
-    data: { balanceCents: wallet.balanceCents - parsed.data.amountCents },
-  });
-
-  const payout = await prisma.payout.create({
-    data: {
-      userId: user.id,
-      walletAccountId: wallet.id,
-      amountCents: parsed.data.amountCents,
-      method: parsed.data.method.toUpperCase() as any,
-      destinationAccount: parsed.data.destinationAccount,
-      status: 'REQUESTED',
-    },
-  });
-
-  return res.status(201).json({
-    payout: serializePayout(payout),
-    wallet: serializeWallet(updatedWallet),
+app.post('/wallet/payout', requireAuth, async (_req, res) => {
+  // Payout integrations are currently simulated. Do not debit wallets or imply money will be sent.
+  return res.status(503).json({
+    error: 'Payouts are not enabled yet. A verified payout provider integration is required.',
   });
 });
 
-app.post('/orders', requireAuth, async (req, res) => {
-  const schema = z.object({ datasetId: z.string() });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-
-  const user = (req as express.Request & { user?: User }).user;
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-
-  const dataset = await prisma.dataset.findUnique({ where: { id: parsed.data.datasetId } });
-  if (!dataset) return res.status(404).json({ error: 'Dataset not found.' });
-  if (dataset.sellerId === user.id) {
-    return res.status(400).json({ error: 'Sellers cannot buy their own dataset.' });
-  }
-
-  const buyerWallet = await prisma.walletAccount.findUnique({ where: { userId: user.id } });
-  if (!buyerWallet || buyerWallet.balanceCents < dataset.priceCents) {
-    return res.status(400).json({ error: 'Buyer wallet balance is insufficient.' });
-  }
-
-  const sellerWallet = await prisma.walletAccount.findUnique({ where: { userId: dataset.sellerId } });
-  const platformWallet = await prisma.walletAccount.findFirst({ where: { userId: 'platform' } });
-
-  const sellerShare = Math.round(dataset.priceCents * 0.85);
-  const platformShare = dataset.priceCents - sellerShare;
-
-  const updatedBuyerWallet = await prisma.walletAccount.update({
-    where: { id: buyerWallet.id },
-    data: { balanceCents: buyerWallet.balanceCents - dataset.priceCents },
-  });
-
-  if (sellerWallet) {
-    await prisma.walletAccount.update({
-      where: { id: sellerWallet.id },
-      data: { balanceCents: sellerWallet.balanceCents + sellerShare },
-    });
-  }
-
-  if (platformWallet) {
-    await prisma.walletAccount.update({
-      where: { id: platformWallet.id },
-      data: { balanceCents: platformWallet.balanceCents + platformShare },
-    });
-  }
-
-  const order = await prisma.order.create({
-    data: {
-      buyerId: user.id,
-      datasetId: dataset.id,
-      totalCents: dataset.priceCents,
-      currency: 'USD',
-      status: 'PAID',
-    },
-  });
-
-  return res.status(201).json({
-    order: {
-      id: order.id,
-      buyerId: order.buyerId,
-      datasetId: order.datasetId,
-      totalCents: order.totalCents,
-      currency: order.currency,
-      status: order.status.toLowerCase(),
-      createdAt: order.createdAt.toISOString(),
-    },
-    buyerWallet: serializeWallet(updatedBuyerWallet),
-    sellerWallet: sellerWallet ? serializeWallet(sellerWallet) : null,
-    platformWallet: platformWallet ? serializeWallet(platformWallet) : null,
+app.post('/orders', requireAuth, async (_req, res) => {
+  // The current wallet flow is not backed by a verified payment processor.
+  // Block it rather than recording an order as PAID without a real payment.
+  return res.status(503).json({
+    error: 'Checkout is not enabled yet. A verified payment integration is required before purchases can be completed.',
   });
 });
 
