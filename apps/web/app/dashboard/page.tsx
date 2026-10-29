@@ -25,6 +25,16 @@ type Wallet = {
   currency: string;
 };
 
+type Payout = {
+  id: string;
+  amountCents: number;
+  method: string;
+  destinationAccount: string;
+  status: string;
+  requestedAt: string;
+  processedAt?: string;
+};
+
 type DashboardOverview = {
   source: string;
   updatedAt: string;
