@@ -206,7 +206,7 @@ const nonDemoDatasetFilter = {
   seller: { isNot: { email: { endsWith: '@local.test' } } },
   title: { not: { contains: '(Sample)' } },
 };
-const nonDemoPaidOrderFilter = {
+const nonDemoOrderFilter = {
   buyer: { isNot: { email: { endsWith: '@local.test' } } },
   dataset: {
     is: {
@@ -215,6 +215,7 @@ const nonDemoPaidOrderFilter = {
     },
   },
 };
+const nonDemoPaidOrderFilter = nonDemoOrderFilter;
 const nonDemoPayoutFilter = {
   user: { isNot: { email: { endsWith: '@local.test' } } },
 };
@@ -736,6 +737,78 @@ app.get('/dashboard/overview', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Dashboard overview failed', error);
     return res.status(500).json({ error: 'Unable to load live dashboard figures from the database.' });
+  }
+});
+
+// Role-scoped dashboard detail endpoints use stored records; no local demo data is returned.
+app.get('/dashboard/datasets', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+
+  const scope: any = user.role === 'admin'
+    ? {}
+    : user.role === 'seller'
+      ? { sellerId: user.id }
+      : { status: 'PUBLISHED' };
+  try {
+    const datasets = await prisma.dataset.findMany({
+      where: { AND: [scope, nonDemoDatasetFilter] },
+      orderBy: { createdAt: 'desc' },
+    });
+    return res.json({ datasets: datasets.map(serializeDataset) });
+  } catch (error) {
+    console.error('Dashboard datasets failed', error);
+    return res.status(500).json({ error: 'Unable to load datasets from the database.' });
+  }
+});
+
+app.get('/dashboard/orders', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+
+  const scope: any = user.role === 'admin'
+    ? {}
+    : user.role === 'seller'
+      ? { dataset: { sellerId: user.id } }
+      : { buyerId: user.id };
+  try {
+    const orders = await prisma.order.findMany({
+      where: { AND: [scope, nonDemoOrderFilter] },
+      include: { dataset: { select: { title: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    return res.json({
+      orders: orders.map((order) => ({
+        id: order.id,
+        datasetTitle: order.dataset.title,
+        totalCents: order.totalCents,
+        currency: order.currency,
+        status: order.status.toLowerCase(),
+        createdAt: order.createdAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('Dashboard orders failed', error);
+    return res.status(500).json({ error: 'Unable to load orders from the database.' });
+  }
+});
+
+app.get('/dashboard/payouts', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+
+  const scope: any = user.role === 'admin' ? {} : { userId: user.id };
+  try {
+    const payouts = await prisma.payout.findMany({
+      where: { AND: [scope, nonDemoPayoutFilter] },
+      orderBy: { requestedAt: 'desc' },
+      take: 100,
+    });
+    return res.json({ payouts: payouts.map(serializePayout) });
+  } catch (error) {
+    console.error('Dashboard payouts failed', error);
+    return res.status(500).json({ error: 'Unable to load payout requests from the database.' });
   }
 });
 
