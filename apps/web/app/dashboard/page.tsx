@@ -92,6 +92,12 @@ export default function DashboardPage() {
         <div className="sidebar-brand">AIDATA</div>
 
         <div className="nav-group">
+          <div className="nav-group-label">Marketplace</div>
+          <a className="nav-item" href="/">🛍️ Browse marketplace</a>
+          <a className="nav-item" href="/suppliers">🔎 Supplier research</a>
+        </div>
+
+        <div className="nav-group">
           <div className="nav-group-label">Main</div>
           <a
             className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}
@@ -196,7 +202,7 @@ function OverviewTab({ user, wallet, formatMoney }: { user?: User | null; wallet
         <div className="metric-box">
           <div className="metric-label">Wallet balance</div>
           <div className="metric-value">{formatMoney(wallet?.balanceCents || 0)}</div>
-          <div className="metric-trend">Ready to withdraw</div>
+          <div className="metric-trend">Wallet balance; payouts require a verified provider</div>
         </div>
         <div className="metric-box">
           <div className="metric-label">Platform revenue</div>
@@ -218,9 +224,9 @@ function OverviewTab({ user, wallet, formatMoney }: { user?: User | null; wallet
       <div className="card">
         <h2 className="card-title">Quick actions</h2>
         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          {user?.role === 'seller' && <button className="primary-button">Publish dataset</button>}
-          {user?.role === 'buyer' && <button className="primary-button">Browse catalog</button>}
-          <button className="secondary-button">View account</button>
+          {user?.role === 'seller' && <a className="primary-button" href="/datasets/new">Publish dataset</a>}
+          {user?.role === 'buyer' && <a className="primary-button" href="/">Browse catalog</a>}
+          <a className="secondary-button" href="/suppliers">Research suppliers</a>
         </div>
       </div>
     </div>
@@ -295,9 +301,14 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
 function WalletTab({ user, wallet, formatMoney }: { user?: User | null; wallet?: Wallet | null; formatMoney: (cents: number) => string }) {
   const [amountToWithdraw, setAmountToWithdraw] = useState('');
   const [bankAccount, setBankAccount] = useState('');
+  const [payoutMessage, setPayoutMessage] = useState('');
 
   const handleWithdraw = async () => {
-    if (!amountToWithdraw || !bankAccount) return;
+    if (!amountToWithdraw || !bankAccount) {
+      setPayoutMessage('Enter an amount and destination details.');
+      return;
+    }
+    setPayoutMessage('');
     try {
       const token = localStorage.getItem('auth_token');
       const res = await fetch(`${API}/wallet/payout`, {
@@ -312,13 +323,17 @@ function WalletTab({ user, wallet, formatMoney }: { user?: User | null; wallet?:
           destinationAccount: bankAccount,
         }),
       });
-      if (res.ok) {
-        alert('Payout requested successfully!');
-        setAmountToWithdraw('');
-        setBankAccount('');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPayoutMessage(data.error || 'Payouts are not enabled until a verified payout provider is connected.');
+        return;
       }
+      setPayoutMessage('Payout request submitted. This is not a completed transfer.');
+      setAmountToWithdraw('');
+      setBankAccount('');
     } catch (error) {
       console.error('Failed to request payout', error);
+      setPayoutMessage('Could not reach the payout service. No transfer has been confirmed.');
     }
   };
 
@@ -355,6 +370,8 @@ function WalletTab({ user, wallet, formatMoney }: { user?: User | null; wallet?:
         <button className="primary-button" onClick={handleWithdraw}>
           Request payout
         </button>
+        {payoutMessage && <p role="status" style={{ color: '#94a3b8' }}>{payoutMessage}</p>}
+        <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>A request does not mean money has been transferred. Payouts require a verified provider integration.</p>
       </div>
     </div>
   );
