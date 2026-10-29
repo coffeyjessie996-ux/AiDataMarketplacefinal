@@ -542,6 +542,162 @@ app.post('/orders', requireAuth, async (_req, res) => {
   });
 });
 
+// Public marketplace figures come from persisted database records only.
+app.get('/marketplace/overview', async (_req, res) => {
+  try {
+    const [
+      paidOrderValue,
+      paidOrders,
+      publishedDatasets,
+      totalDatasets,
+      supplierResearchRecords,
+      latestSupplierRecord,
+    ] = await Promise.all([
+      prisma.order.aggregate({
+        _sum: { totalCents: true },
+        where: { status: 'PAID' },
+      }),
+      prisma.order.count({ where: { status: 'PAID' } }),
+      prisma.dataset.count({ where: { status: 'PUBLISHED' } }),
+      prisma.dataset.count(),
+      prisma.supplierResearchRecord.count(),
+      prisma.supplierResearchRecord.findFirst({
+        orderBy: { retrievedAt: 'desc' },
+        select: { retrievedAt: true },
+      }),
+    ]);
+
+    return res.json({
+      source: 'database',
+      updatedAt: new Date().toISOString(),
+      // These are database records, not confirmation of a processed payment.
+      paymentProcessingEnabled: false,
+      snapshot: {
+        recordedPaidOrderValueCents: Number(paidOrderValue._sum.totalCents ?? 0),
+        paidOrders,
+        publishedDatasets,
+        totalDatasets,
+        supplierResearchRecords,
+        latestSupplierRetrievedAt: latestSupplierRecord?.retrievedAt.toISOString() ?? null,
+      },
+    });
+  } catch (error) {
+    console.error('Marketplace overview failed', error);
+    return res.status(500).json({ error: 'Unable to load marketplace figures from the database.' });
+  }
+});
+
+// Authenticated dashboard figures are scoped to the signed-in account, except for admins.
+app.get('/dashboard/overview', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+
+  const isAdmin = user.role === 'admin';
+  const paidOrderWhere: any = isAdmin
+    ? { status: 'PAID' }
+    : user.role === 'seller'
+      ? { status: 'PAID', dataset: { sellerId: user.id } }
+      : { status: 'PAID', buyerId: user.id };
+
+  const datasetWhere: any = isAdmin
+    ? {}
+    : user.role === 'seller'
+      ? { sellerId: user.id }
+      : { status: 'PUBLISHED' };
+
+  const publishedDatasetWhere: any = user.role === 'seller'
+    ? { sellerId: user.id, status: 'PUBLISHED' }
+    : { status: 'PUBLISHED' };
+
+  const payoutWhere: any = isAdmin
+    ? { status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] } }
+    : { userId: user.id, status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] } };
+
+  try {
+    const [
+      wallet,
+      totalDatasets,
+      publishedDatasets,
+      paidOrderValue,
+      paidOrders,
+      pendingPayouts,
+      supplierResearchRecords,
+      latestSupplierRecord,
+      recentOrders,
+      recentSupplierRecords,
+      userCount,
+    ] = await Promise.all([
+      prisma.walletAccount.findUnique({ where: { userId: user.id } }),
+      prisma.dataset.count({ where: datasetWhere }),
+      prisma.dataset.count({ where: publishedDatasetWhere }),
+      prisma.order.aggregate({ _sum: { totalCents: true }, where: paidOrderWhere }),
+      prisma.order.count({ where: paidOrderWhere }),
+      prisma.payout.count({ where: payoutWhere }),
+      prisma.supplierResearchRecord.count(),
+      prisma.supplierResearchRecord.findFirst({
+        orderBy: { retrievedAt: 'desc' },
+        select: { retrievedAt: true },
+      }),
+      prisma.order.findMany({
+        where: paidOrderWhere,
+        include: { dataset: { select: { title: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 6,
+      }),
+      prisma.supplierResearchRecord.findMany({
+        orderBy: { retrievedAt: 'desc' },
+        select: {
+          id: true,
+          source: true,
+          supplierName: true,
+          awardAmount: true,
+          sourceUrl: true,
+          retrievedAt: true,
+        },
+        take: 5,
+      }),
+      isAdmin ? prisma.user.count() : Promise.resolve(null),
+    ]);
+
+    return res.json({
+      source: 'database',
+      updatedAt: new Date().toISOString(),
+      role: user.role,
+      paymentProcessingEnabled: false,
+      snapshot: {
+        walletBalanceCents: wallet?.balanceCents ?? 0,
+        totalDatasets,
+        publishedDatasets,
+        recordedPaidOrderValueCents: Number(paidOrderValue._sum.totalCents ?? 0),
+        paidOrders,
+        pendingPayouts,
+        supplierResearchRecords,
+        latestSupplierRetrievedAt: latestSupplierRecord?.retrievedAt.toISOString() ?? null,
+        userCount,
+      },
+      recentOrders: recentOrders.map((order) => ({
+        id: order.id,
+        datasetTitle: order.dataset.title,
+        totalCents: order.totalCents,
+        currency: order.currency,
+        status: order.status.toLowerCase(),
+        createdAt: order.createdAt.toISOString(),
+      })),
+      recentSupplierRecords: recentSupplierRecords.map((record) => ({
+        id: record.id,
+        source: record.source,
+        supplierName: record.supplierName,
+        awardAmount: record.awardAmount?.toString() ?? null,
+        sourceUrl: record.sourceUrl,
+        retrievedAt: record.retrievedAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('Dashboard overview failed', error);
+    return res.status(500).json({ error: 'Unable to load live dashboard figures from the database.' });
+  }
+});
+
 app.get('/admin/overview', requireAuth, requireRole(['admin']), async (_req, res) => {
   const [
     datasets,
