@@ -29,6 +29,7 @@ type DashboardOverview = {
   source: string;
   updatedAt: string;
   role: string;
+  testAccount: boolean;
   paymentProcessingEnabled: boolean;
   snapshot: {
     walletBalanceCents: number;
@@ -269,6 +270,12 @@ function OverviewTab({ user, wallet, formatMoney }: { user?: User | null; wallet
         </div>
       </section>
 
+      {overview?.testAccount && (
+        <div className="live-warning">
+          <strong>This is a test account.</strong>
+          <span>Local-only seeded wallet amounts and demo orders are excluded from live figures.</span>
+        </div>
+      )}
       {error && (
         <div className="live-warning" role="alert">
           <strong>Dashboard data could not be loaded.</strong>
