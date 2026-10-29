@@ -385,31 +385,53 @@ app.post('/wallet/payout', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
-  const wallet = await prisma.walletAccount.findUnique({ where: { userId: user.id } });
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found.' });
-  if (wallet.balanceCents < parsed.data.amountCents) {
-    return res.status(400).json({ error: 'Insufficient wallet balance.' });
+  // A payout request is only a request; it is not proof that money was transferred.
+  // Keep the wallet ledger unchanged until an authorized payout processor settles it.
+  const result = await prisma.$transaction(async (tx) => {
+    const wallet = await tx.walletAccount.findUnique({ where: { userId: user.id } });
+    if (!wallet) return { error: 'Wallet not found.', status: 404 as const };
+
+    const pending = await tx.payout.aggregate({
+      where: {
+        userId: user.id,
+        status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] },
+      },
+      _sum: { amountCents: true },
+    });
+    const pendingCents = pending._sum.amountCents ?? 0;
+    const availableCents = wallet.balanceCents - pendingCents;
+
+    if (parsed.data.amountCents > availableCents) {
+      return { error: 'Insufficient available balance after pending payout requests.', status: 400 as const };
+    }
+
+    const payout = await tx.payout.create({
+      data: {
+        userId: user.id,
+        walletAccountId: wallet.id,
+        amountCents: parsed.data.amountCents,
+        method: parsed.data.method.toUpperCase() as any,
+        destinationAccount: parsed.data.destinationAccount,
+        status: 'REQUESTED',
+      },
+    });
+
+    return {
+      payout,
+      wallet,
+      availableBalanceCents: availableCents - parsed.data.amountCents,
+    };
+  });
+
+  if ('error' in result) {
+    return res.status(result.status).json({ error: result.error });
   }
 
-  const updatedWallet = await prisma.walletAccount.update({
-    where: { id: wallet.id },
-    data: { balanceCents: wallet.balanceCents - parsed.data.amountCents },
-  });
-
-  const payout = await prisma.payout.create({
-    data: {
-      userId: user.id,
-      walletAccountId: wallet.id,
-      amountCents: parsed.data.amountCents,
-      method: parsed.data.method.toUpperCase() as any,
-      destinationAccount: parsed.data.destinationAccount,
-      status: 'REQUESTED',
-    },
-  });
-
   return res.status(201).json({
-    payout: serializePayout(payout),
-    wallet: serializeWallet(updatedWallet),
+    payout: serializePayout(result.payout),
+    wallet: serializeWallet(result.wallet),
+    availableBalanceCents: result.availableBalanceCents,
+    message: 'Payout request recorded. Funds have not been transferred.',
   });
 });
 

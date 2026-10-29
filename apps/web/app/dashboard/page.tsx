@@ -313,7 +313,7 @@ function WalletTab({ user, wallet, formatMoney }: { user?: User | null; wallet?:
         }),
       });
       if (res.ok) {
-        alert('Payout requested successfully!');
+        alert('Payout request recorded. Funds have not been transferred yet; the request must be processed.');
         setAmountToWithdraw('');
         setBankAccount('');
       }
