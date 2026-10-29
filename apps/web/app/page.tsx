@@ -30,6 +30,7 @@ export default function HomePage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -39,12 +40,21 @@ export default function HomePage() {
           fetch(`${API}/marketplace/overview`, { cache: 'no-store' }),
         ]);
 
-        const datasetsJson = await datasetsRes.json();
-        const overviewJson = await overviewRes.json();
+        const datasetsJson = await datasetsRes.json().catch(() => ({}));
+        const overviewJson = await overviewRes.json().catch(() => ({}));
+        if (!datasetsRes.ok || !overviewRes.ok) {
+          throw new Error(
+            overviewJson.error ||
+            datasetsJson.error ||
+            'Live marketplace data is currently unavailable.',
+          );
+        }
         setDatasets(datasetsJson.datasets || []);
         setOverview(overviewJson.snapshot || null);
+        setDataError(null);
       } catch (error) {
         console.error('Failed to load marketplace data', error);
+        setDataError(error instanceof Error ? error.message : 'Live marketplace data is currently unavailable.');
       } finally {
         setLoading(false);
       }
@@ -99,7 +109,12 @@ export default function HomePage() {
               <span>Supplier research records</span>
               <strong>{overview?.supplierResearchRecords ?? '—'}</strong>
             </div>
-            <p className="marketplace-data-note">Live database counts. Orders marked paid in the database are not proof that a payment processor settled funds. Checkout and payouts are currently disabled.</p>
+            {dataError && (
+              <p className="marketplace-data-note" role="status" style={{ color: '#fbbf24' }}>
+                Live figures unavailable: {dataError}
+              </p>
+            )}
+            <p className="marketplace-data-note">Figures appear only when the connected database responds. Orders marked paid in the database are not proof that a payment processor settled funds. Checkout and payouts are currently disabled.</p>
           </div>
         </div>
       </section>
