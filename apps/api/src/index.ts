@@ -697,7 +697,7 @@ app.get('/dashboard/overview', requireAuth, async (req, res) => {
         },
         take: 5,
       }),
-      isAdmin ? prisma.user.count() : Promise.resolve(null),
+      isAdmin ? prisma.user.count({ where: nonDemoUserFilter }) : Promise.resolve(null),
     ]);
 
     return res.json({
