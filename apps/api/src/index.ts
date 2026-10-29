@@ -285,6 +285,13 @@ app.get('/auth/me', requireAuth, async (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const wallet = await prisma.walletAccount.findUnique({ where: { userId: user.id } });
+  const pendingPayouts = await prisma.payout.aggregate({
+    where: { userId: user.id, status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] } },
+    _sum: { amountCents: true },
+  });
+  const availableBalanceCents = wallet
+    ? Math.max(0, wallet.balanceCents - (pendingPayouts._sum.amountCents ?? 0))
+    : 0;
   return res.json({
     user: {
       id: user.id,
@@ -293,7 +300,7 @@ app.get('/auth/me', requireAuth, async (req, res) => {
       role: user.role,
       status: user.status,
     },
-    wallet: wallet ? serializeWallet(wallet) : null,
+    wallet: wallet ? { ...serializeWallet(wallet), availableBalanceCents } : null,
   });
 });
 
@@ -373,7 +380,16 @@ app.get('/wallet', requireAuth, async (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const wallet = await prisma.walletAccount.findUnique({ where: { userId: user.id } });
-  return res.json({ wallet: wallet ? serializeWallet(wallet) : null });
+  const pendingPayouts = await prisma.payout.aggregate({
+    where: { userId: user.id, status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] } },
+    _sum: { amountCents: true },
+  });
+  const availableBalanceCents = wallet
+    ? Math.max(0, wallet.balanceCents - (pendingPayouts._sum.amountCents ?? 0))
+    : 0;
+  return res.json({
+    wallet: wallet ? { ...serializeWallet(wallet), availableBalanceCents } : null,
+  });
 });
 
 app.post('/wallet/payout', requireAuth, async (req, res) => {
@@ -421,7 +437,7 @@ app.post('/wallet/payout', requireAuth, async (req, res) => {
       wallet,
       availableBalanceCents: availableCents - parsed.data.amountCents,
     };
-  });
+  }, { isolationLevel: 'Serializable' });
 
   if ('error' in result) {
     return res.status(result.status).json({ error: result.error });

@@ -22,6 +22,7 @@ type Dataset = {
 type Wallet = {
   id: string;
   balanceCents: number;
+  availableBalanceCents?: number;
   currency: string;
 };
 
@@ -195,7 +196,7 @@ function OverviewTab({ user, wallet, formatMoney }: { user?: User | null; wallet
       <div className="metric-grid">
         <div className="metric-box">
           <div className="metric-label">Wallet balance</div>
-          <div className="metric-value">{formatMoney(wallet?.balanceCents || 0)}</div>
+          <div className="metric-value">{formatMoney(wallet?.availableBalanceCents ?? wallet?.balanceCents ?? 0)}</div>
           <div className="metric-trend">Ready to withdraw</div>
         </div>
         <div className="metric-box">
@@ -329,7 +330,7 @@ function WalletTab({ user, wallet, formatMoney }: { user?: User | null; wallet?:
         <div style={{ fontSize: '2.5rem', fontWeight: 700, color: '#38bdf8', marginBottom: '8px' }}>
           {formatMoney(wallet?.balanceCents || 0)}
         </div>
-        <p style={{ color: '#94a3b8', margin: 0 }}>Available to withdraw</p>
+        <p style={{ color: '#94a3b8', margin: 0 }}>Available to withdraw after pending payout requests</p>
       </div>
 
       <div className="card">
