@@ -200,6 +200,28 @@ const payoutSchema = z.object({
   destinationAccount: z.string().min(4),
 });
 
+// Seed data is explicitly marked by its local-only email domain and sample labels.
+// Exclude it from public/live metrics so test rows cannot look like real sales.
+const nonDemoDatasetFilter = {
+  seller: { isNot: { email: { endsWith: '@local.test' } } },
+  title: { not: { contains: '(Sample)' } },
+};
+const nonDemoPaidOrderFilter = {
+  buyer: { isNot: { email: { endsWith: '@local.test' } } },
+  dataset: {
+    is: {
+      seller: { isNot: { email: { endsWith: '@local.test' } } },
+      title: { not: { contains: '(Sample)' } },
+    },
+  },
+};
+const nonDemoPayoutFilter = {
+  user: { isNot: { email: { endsWith: '@local.test' } } },
+};
+const nonDemoUserFilter = {
+  email: { not: { endsWith: '@local.test' } },
+};
+
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'ai-data-marketplace-api', timestamp: new Date().toISOString() });
 });
@@ -303,12 +325,17 @@ app.get('/users', requireAuth, requireRole(['admin']), async (_req, res) => {
 });
 
 app.get('/datasets', async (_req, res) => {
-  const datasets = await prisma.dataset.findMany({ orderBy: { createdAt: 'desc' } });
+  const datasets = await prisma.dataset.findMany({
+    where: { AND: [{ status: 'PUBLISHED' }, nonDemoDatasetFilter] },
+    orderBy: { createdAt: 'desc' },
+  });
   return res.json({ datasets: datasets.map(serializeDataset) });
 });
 
 app.get('/datasets/:id', async (req, res) => {
-  const dataset = await prisma.dataset.findUnique({ where: { id: req.params.id } });
+  const dataset = await prisma.dataset.findFirst({
+    where: { AND: [{ id: req.params.id, status: 'PUBLISHED' }, nonDemoDatasetFilter] },
+  });
   if (!dataset) return res.status(404).json({ error: 'Dataset not found.' });
   return res.json({ dataset: serializeDataset(dataset) });
 });
@@ -555,11 +582,11 @@ app.get('/marketplace/overview', async (_req, res) => {
     ] = await Promise.all([
       prisma.order.aggregate({
         _sum: { totalCents: true },
-        where: { status: 'PAID' },
+        where: { AND: [{ status: 'PAID' }, nonDemoPaidOrderFilter] },
       }),
-      prisma.order.count({ where: { status: 'PAID' } }),
-      prisma.dataset.count({ where: { status: 'PUBLISHED' } }),
-      prisma.dataset.count(),
+      prisma.order.count({ where: { AND: [{ status: 'PAID' }, nonDemoPaidOrderFilter] } }),
+      prisma.dataset.count({ where: { AND: [{ status: 'PUBLISHED' }, nonDemoDatasetFilter] } }),
+      prisma.dataset.count({ where: nonDemoDatasetFilter }),
       prisma.supplierResearchRecord.count(),
       prisma.supplierResearchRecord.findFirst({
         orderBy: { retrievedAt: 'desc' },
@@ -593,25 +620,38 @@ app.get('/dashboard/overview', requireAuth, async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Authentication required.' });
 
   const isAdmin = user.role === 'admin';
-  const paidOrderWhere: any = isAdmin
-    ? { status: 'PAID' }
+  const isTestAccount = user.email.toLowerCase().endsWith('@local.test');
+  const orderScope: any = isAdmin
+    ? {}
     : user.role === 'seller'
-      ? { status: 'PAID', dataset: { sellerId: user.id } }
-      : { status: 'PAID', buyerId: user.id };
+      ? { dataset: { sellerId: user.id } }
+      : { buyerId: user.id };
+  const paidOrderWhere: any = {
+    AND: [{ status: 'PAID' }, orderScope, nonDemoPaidOrderFilter],
+  };
 
-  const datasetWhere: any = isAdmin
+  const datasetScope: any = isAdmin
     ? {}
     : user.role === 'seller'
       ? { sellerId: user.id }
       : { status: 'PUBLISHED' };
+  const datasetWhere: any = { AND: [datasetScope, nonDemoDatasetFilter] };
 
-  const publishedDatasetWhere: any = user.role === 'seller'
+  const publishedDatasetScope: any = user.role === 'seller'
     ? { sellerId: user.id, status: 'PUBLISHED' }
     : { status: 'PUBLISHED' };
+  const publishedDatasetWhere: any = {
+    AND: [publishedDatasetScope, nonDemoDatasetFilter],
+  };
 
-  const payoutWhere: any = isAdmin
-    ? { status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] } }
-    : { userId: user.id, status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] } };
+  const payoutScope: any = isAdmin ? {} : { userId: user.id };
+  const payoutWhere: any = {
+    AND: [
+      payoutScope,
+      nonDemoPayoutFilter,
+      { status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] } },
+    ],
+  };
 
   try {
     const [
@@ -663,9 +703,10 @@ app.get('/dashboard/overview', requireAuth, async (req, res) => {
       source: 'database',
       updatedAt: new Date().toISOString(),
       role: user.role,
+      testAccount: isTestAccount,
       paymentProcessingEnabled: false,
       snapshot: {
-        walletBalanceCents: wallet?.balanceCents ?? 0,
+        walletBalanceCents: isTestAccount ? 0 : (wallet?.balanceCents ?? 0),
         totalDatasets,
         publishedDatasets,
         recordedPaidOrderValueCents: Number(paidOrderValue._sum.totalCents ?? 0),
@@ -709,18 +750,19 @@ app.get('/admin/overview', requireAuth, requireRole(['admin']), async (_req, res
     pendingPayouts,
     platformLiquidity,
   ] = await Promise.all([
-    prisma.dataset.findMany({ orderBy: { createdAt: 'desc' } }),
-    prisma.order.findMany({ orderBy: { createdAt: 'desc' } }),
-    prisma.payout.findMany({ orderBy: { requestedAt: 'desc' } }),
-    prisma.user.findMany({ orderBy: { createdAt: 'desc' } }),
+    prisma.dataset.findMany({ where: nonDemoDatasetFilter, orderBy: { createdAt: 'desc' } }),
+    prisma.order.findMany({ where: nonDemoPaidOrderFilter, orderBy: { createdAt: 'desc' } }),
+    prisma.payout.findMany({ where: nonDemoPayoutFilter, orderBy: { requestedAt: 'desc' } }),
+    prisma.user.findMany({ where: nonDemoUserFilter, orderBy: { createdAt: 'desc' } }),
     prisma.order.aggregate({
       _sum: { totalCents: true },
-      where: { status: 'PAID' },
+      where: { AND: [{ status: 'PAID' }, nonDemoPaidOrderFilter] },
     }),
-    prisma.order.count({ where: { status: 'PAID' } }),
-    prisma.payout.count({ where: { status: { not: 'COMPLETED' } } }),
+    prisma.order.count({ where: { AND: [{ status: 'PAID' }, nonDemoPaidOrderFilter] } }),
+    prisma.payout.count({ where: { AND: [{ status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] } }, nonDemoPayoutFilter] } }),
     prisma.walletAccount.aggregate({
       _sum: { balanceCents: true },
+      where: { user: { isNot: { email: { endsWith: '@local.test' } } } },
     }),
   ]);
 
