@@ -745,8 +745,11 @@ const startScrapers = async () => {
         </div>
       </div>
 
+      <p className="live-footer-note" style={{ marginTop: '16px' }}>
+        <strong>Note:</strong> order totals are database records marked paid; they do not confirm settlement by a payment provider. Checkout and payout processing are disabled in this build.
+      </p>
       <div className="card" style={{ marginTop: '24px' }}>
-        <h2 className="card-title">Recent orders</h2>
+        <h2 className="card-title">Recent order records</h2>
         <div className="table-container">
           <table>
             <thead>
