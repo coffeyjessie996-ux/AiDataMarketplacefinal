@@ -29,6 +29,19 @@ app.use((req, _res, next) => {
   next();
 });
 
+function hasValidDatabaseUrl() {
+  return /^(postgresql|postgres):\\/\\//i.test(process.env.DATABASE_URL || '');
+}
+
+// Do not let a missing/invalid DATABASE_URL look like an empty, successful marketplace.
+// Keep /health available so deployment diagnostics can report the configuration state.
+app.use((req, res, next) => {
+  if (req.path === '/health' || hasValidDatabaseUrl()) return next();
+  return res.status(503).json({
+    error: 'Database not configured: set DATABASE_URL to a valid PostgreSQL connection string to load live marketplace figures.',
+  });
+});
+
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-this-secret';
 
 function makeUserToken(userId: string) {
@@ -224,7 +237,12 @@ const nonDemoUserFilter = {
 };
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'ai-data-marketplace-api', timestamp: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: 'ai-data-marketplace-api',
+    databaseConfigured: hasValidDatabaseUrl(),
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.post('/auth/register', async (req, res) => {
