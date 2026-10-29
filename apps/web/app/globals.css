@@ -984,3 +984,66 @@ table.live-table {
   font-size: 0.78rem;
   line-height: 1.6;
 }
+
+/* Keep dashboard navigation accessible on tablets and phones instead of hiding it. */
+@media (max-width: 1024px) {
+  .dashboard-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .sidebar-brand {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 8px;
+  }
+  .nav-group {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+  }
+  .nav-group-label {
+    display: none;
+  }
+  .nav-item {
+    flex: 0 0 auto;
+    padding: 9px 11px;
+    font-size: 0.82rem;
+  }
+  .nav-item.active {
+    padding-left: 8px;
+  }
+  .dashboard-main {
+    min-width: 0;
+    padding: 18px;
+  }
+}
+@media (max-width: 640px) {
+  .dashboard-main {
+    padding: 12px;
+  }
+  .sidebar {
+    gap: 8px;
+    padding: 8px;
+  }
+  .sidebar-brand {
+    font-size: 0.95rem;
+  }
+  .nav-item {
+    padding: 8px 10px;
+  }
+}
