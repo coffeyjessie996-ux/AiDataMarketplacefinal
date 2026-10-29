@@ -440,7 +440,7 @@ app.post('/wallet/payout', requireAuth, async (req, res) => {
   }, { isolationLevel: 'Serializable' });
 
   if ('error' in result) {
-    return res.status(result.status).json({ error: result.error });
+    return res.status(result.status ?? 400).json({ error: result.error });
   }
 
   return res.status(201).json({
