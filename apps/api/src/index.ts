@@ -30,7 +30,8 @@ app.use((req, _res, next) => {
 });
 
 function hasValidDatabaseUrl() {
-  return /^(postgresql|postgres):\\/\\//i.test(process.env.DATABASE_URL || '');
+  const url = process.env.DATABASE_URL || '';
+  return url.startsWith('postgresql://') || url.startsWith('postgres://');
 }
 
 // Do not let a missing/invalid DATABASE_URL look like an empty, successful marketplace.
