@@ -397,40 +397,49 @@ function OverviewTab({ user, wallet, formatMoney }: { user?: User | null; wallet
 
 function DatasetsTab({ formatMoney }: { formatMoney: (cents: number) => string }) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       try {
-        const res = await fetch(`${API}/datasets`);
-        if (res.ok) {
-          const data = await res.json();
-          setDatasets(data.datasets || []);
-        }
-      } catch (error) {
-        console.error('Failed to fetch datasets', error);
+        const token = localStorage.getItem('auth_token');
+        const res = await fetch(`${API}/dashboard/datasets`, {
+          headers: { Authorization: `Bearer ${token || ''}` },
+          cache: 'no-store',
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Unable to load datasets.');
+        if (!cancelled) setDatasets(Array.isArray(data.datasets) ? data.datasets : []);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load datasets.');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
-    load();
+    void load();
+    return () => { cancelled = true; };
   }, []);
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <h2 style={{ margin: 0 }}>My datasets</h2>
-        <button className="primary-button">Create dataset</button>
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+        <div>
+          <h2 className="card-title" style={{ marginBottom: '6px' }}>My datasets</h2>
+          <p style={{ margin: 0, color: '#94a3b8' }}>Records owned by your account, loaded from the database.</p>
+        </div>
+        <a href="/suppliers" className="secondary-button">Supplier research</a>
       </div>
-      <div className="card">
+      {error && <p role="alert" style={{ color: '#fbbf24' }}>{error}</p>}
+      {loading ? (
+        <p className="live-empty">Loading your dataset records…</p>
+      ) : datasets.length === 0 ? (
+        <p className="live-empty">No dataset records are stored for this account yet. No sample listings are being substituted.</p>
+      ) : (
         <div className="table-container">
           <table>
-            <thead>
-              <tr>
-                <th>Title</th>
-                <th>Category</th>
-                <th>Price</th>
-                <th>Quality</th>
-                <th>Status</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Title</th><th>Category</th><th>Price</th><th>Quality</th><th>Status</th></tr></thead>
             <tbody>
               {datasets.map((dataset) => (
                 <tr key={dataset.id}>
@@ -438,24 +447,70 @@ function DatasetsTab({ formatMoney }: { formatMoney: (cents: number) => string }
                   <td>{dataset.category}</td>
                   <td>{formatMoney(dataset.priceCents)}</td>
                   <td>{dataset.qualityScore}/100</td>
-                  <td>
-                    <span className={`badge ${dataset.status.toLowerCase()}`}>{dataset.status}</span>
-                  </td>
+                  <td><span className={`badge ${dataset.status.toLowerCase()}`}>{dataset.status}</span></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
 function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string }) {
+  const [orders, setOrders] = useState<Array<{ id: string; datasetTitle: string; totalCents: number; currency: string; status: string; createdAt: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const token = localStorage.getItem('auth_token');
+        const res = await fetch(`${API}/dashboard/orders`, {
+          headers: { Authorization: `Bearer ${token || ''}` },
+          cache: 'no-store',
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Unable to load purchases.');
+        if (!cancelled) setOrders(Array.isArray(data.orders) ? data.orders : []);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load purchases.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div className="card">
-      <h2 className="card-title">Your purchases</h2>
-      <p style={{ color: '#94a3b8' }}>No purchases yet. Visit the marketplace to buy datasets.</p>
+      <h2 className="card-title">Purchase history</h2>
+      <p style={{ color: '#94a3b8', marginTop: '-8px' }}>Order records saved for your account. A database status does not independently confirm processor settlement.</p>
+      {error && <p role="alert" style={{ color: '#fbbf24' }}>{error}</p>}
+      {loading ? (
+        <p className="live-empty">Loading saved purchases…</p>
+      ) : orders.length === 0 ? (
+        <p className="live-empty">No purchase records are stored for this account yet.</p>
+      ) : (
+        <div className="table-container">
+          <table>
+            <thead><tr><th>Dataset</th><th>Date</th><th>Recorded total</th><th>Status</th></tr></thead>
+            <tbody>
+              {orders.map((order) => (
+                <tr key={order.id}>
+                  <td>{order.datasetTitle}</td>
+                  <td>{new Date(order.createdAt).toLocaleDateString()}</td>
+                  <td>{formatMoney(order.totalCents)}</td>
+                  <td><span className={`badge ${order.status.toLowerCase()}`}>{order.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -506,7 +561,7 @@ function WalletTab({ user, wallet, formatMoney }: { user?: User | null; wallet?:
         <div style={{ fontSize: '2.5rem', fontWeight: 700, color: '#38bdf8', marginBottom: '8px' }}>
           {formatMoney(wallet?.balanceCents || 0)}
         </div>
-        <p style={{ color: '#94a3b8', margin: 0 }}>Available to withdraw</p>
+        <p style={{ color: '#94a3b8', margin: 0 }}>Ledger balance only. Cashouts are disabled until a payout provider is connected.</p>
       </div>
 
       <div className="card">
@@ -540,53 +595,53 @@ function WalletTab({ user, wallet, formatMoney }: { user?: User | null; wallet?:
 }
 
 function PayoutsTab({ formatMoney }: { formatMoney: (cents: number) => string }) {
-  const [payouts, setPayouts] = useState<any[]>([]);
+  const [payouts, setPayouts] = useState<Payout[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       try {
         const token = localStorage.getItem('auth_token');
-        const res = await fetch(`${API}/admin/overview`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const res = await fetch(`${API}/dashboard/payouts`, {
+          headers: { Authorization: `Bearer ${token || ''}` },
+          cache: 'no-store',
         });
-        if (res.ok) {
-          const data = await res.json();
-          setPayouts(data.payouts || []);
-        }
-      } catch (error) {
-        console.error('Failed to fetch payouts', error);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Unable to load payout requests.');
+        if (!cancelled) setPayouts(Array.isArray(data.payouts) ? data.payouts : []);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load payout requests.');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
-    load();
+    void load();
+    return () => { cancelled = true; };
   }, []);
 
   return (
     <div className="card">
-      <h2 className="card-title">Payout history</h2>
-      {payouts.length === 0 ? (
-        <p style={{ color: '#94a3b8' }}>No payouts yet.</p>
+      <h2 className="card-title">Payout request history</h2>
+      <p style={{ color: '#94a3b8', marginTop: '-8px' }}>Stored payout requests only. A request is not a completed bank transfer.</p>
+      {error && <p role="alert" style={{ color: '#fbbf24' }}>{error}</p>}
+      {loading ? (
+        <p className="live-empty">Loading payout requests…</p>
+      ) : payouts.length === 0 ? (
+        <p className="live-empty">No payout requests are stored for this account. The payout provider is currently disabled, so transfers cannot be processed.</p>
       ) : (
         <div className="table-container">
           <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Amount</th>
-                <th>Method</th>
-                <th>Account</th>
-                <th>Status</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Requested</th><th>Amount</th><th>Method</th><th>Destination</th><th>Status</th></tr></thead>
             <tbody>
-              {payouts.map((payout: any) => (
+              {payouts.map((payout) => (
                 <tr key={payout.id}>
                   <td>{new Date(payout.requestedAt).toLocaleDateString()}</td>
                   <td>{formatMoney(payout.amountCents)}</td>
                   <td>{payout.method}</td>
                   <td>{payout.destinationAccount}</td>
-                  <td>
-                    <span className={`badge ${payout.status.toLowerCase()}`}>{payout.status}</span>
-                  </td>
+                  <td><span className={`badge ${payout.status.toLowerCase()}`}>{payout.status}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -673,15 +728,15 @@ const startScrapers = async () => {
   )}
 </div>
         <div className="metric-box">
-          <div className="metric-label">Total revenue</div>
+          <div className="metric-label">Recorded paid order value</div>
           <div className="metric-value">{formatMoney(overview?.totalRevenueCents || 0)}</div>
         </div>
         <div className="metric-box">
-          <div className="metric-label">Active datasets</div>
+          <div className="metric-label">Dataset records</div>
           <div className="metric-value">{overview?.totalDatasets || 0}</div>
         </div>
         <div className="metric-box">
-          <div className="metric-label">Completed orders</div>
+          <div className="metric-label">Paid orders recorded</div>
           <div className="metric-value">{overview?.activeOrders || 0}</div>
         </div>
         <div className="metric-box">
