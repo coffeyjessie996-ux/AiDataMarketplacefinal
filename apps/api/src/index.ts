@@ -872,7 +872,9 @@ app.get('/admin/database-security-check', requireAuth, requireRole(['admin']), a
         ('Order'),
         ('WalletTransaction'),
         ('SupplierResearchRecord'),
-        ('Payout')
+        ('Payout'),
+        ('Lead'),
+        ('LeadActivity')
       ) AS requested(table_name)
       LEFT JOIN pg_class AS table_info
         ON table_info.relname = requested.table_name
