@@ -831,6 +831,84 @@ app.get('/dashboard/payouts', requireAuth, async (req, res) => {
   }
 });
 
+// Admin-only diagnostic: inspect the exact PostgreSQL role used by this API connection.
+ // Never returns connection strings, credentials, or role names.
+app.get('/admin/database-security-check', requireAuth, requireRole(['admin']), async (_req, res) => {
+  try {
+    const rows = await prisma.$queryRaw<Array<{
+      isSuperuser: boolean;
+      bypassRls: boolean;
+      tableName: string;
+      tableExists: boolean;
+      rlsEnabled: boolean;
+      forceRls: boolean;
+      isTableOwner: boolean;
+      canSelect: boolean;
+      canInsert: boolean;
+      canUpdate: boolean;
+      canDelete: boolean;
+    }>>`
+      SELECT
+        role.rolsuper AS "isSuperuser",
+        role.rolbypassrls AS "bypassRls",
+        requested.table_name AS "tableName",
+        (table_info.oid IS NOT NULL) AS "tableExists",
+        COALESCE(table_info.relrowsecurity, false) AS "rlsEnabled",
+        COALESCE(table_info.relforcerowsecurity, false) AS "forceRls",
+        COALESCE(table_info.relowner = role.oid, false) AS "isTableOwner",
+        COALESCE(has_table_privilege(current_user, table_info.oid, 'SELECT'), false) AS "canSelect",
+        COALESCE(has_table_privilege(current_user, table_info.oid, 'INSERT'), false) AS "canInsert",
+        COALESCE(has_table_privilege(current_user, table_info.oid, 'UPDATE'), false) AS "canUpdate",
+        COALESCE(has_table_privilege(current_user, table_info.oid, 'DELETE'), false) AS "canDelete"
+      FROM pg_roles AS role
+      CROSS JOIN (VALUES
+        ('User'),
+        ('WalletAccount'),
+        ('Dataset'),
+        ('Listing'),
+        ('Order'),
+        ('WalletTransaction'),
+        ('SupplierResearchRecord'),
+        ('Payout')
+      ) AS requested(table_name)
+      LEFT JOIN pg_class AS table_info
+        ON table_info.relname = requested.table_name
+       AND table_info.relnamespace = 'public'::regnamespace
+       AND table_info.relkind IN ('r', 'p')
+      WHERE role.rolname = current_user
+      ORDER BY requested.table_name
+    `;
+
+    const role = rows[0];
+    const tableChecks = rows.map((table) => ({
+      table: table.tableName,
+      exists: table.tableExists,
+      rlsEnabled: table.rlsEnabled,
+      forceRls: table.forceRls,
+      isTableOwner: table.isTableOwner,
+      canSelect: table.canSelect,
+      canInsert: table.canInsert,
+      canUpdate: table.canUpdate,
+      canDelete: table.canDelete,
+      canOperateWithRls: table.tableExists && (
+        role.isSuperuser ||
+        role.bypassRls ||
+        (table.isTableOwner && !table.forceRls)
+      ),
+    }));
+
+    return res.json({
+      source: 'current_api_database_connection',
+      roleCanBypassRls: Boolean(role?.isSuperuser || role?.bypassRls),
+      tables: tableChecks,
+      note: 'Run this diagnostic using an administrator account. It does not reveal credentials or modify database state.',
+    });
+  } catch (error) {
+    console.error('Database security diagnostic failed', error);
+    return res.status(500).json({ error: 'Unable to inspect the API database connection permissions.' });
+  }
+});
+
 app.get('/admin/overview', requireAuth, requireRole(['admin']), async (_req, res) => {
   const [
     datasets,
