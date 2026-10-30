@@ -78,7 +78,7 @@ model Order {
   listing      Listing? @relation(fields: [listingId], references: [id])
   totalCents   Int
   currency     String @default("USD")
-  status       OrderStatus @default(PAID)
+  status       OrderStatus @default(PENDING)
   createdAt    DateTime @default(now())
 }
 
