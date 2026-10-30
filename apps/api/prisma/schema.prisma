@@ -26,21 +26,21 @@ model User {
 }
 
 model WalletAccount {
-  id        String @id @default(cuid())
-  userId    String @unique
-  user      User   @relation(fields: [userId], references: [id])
-  balanceCents Int @default(0)
-  currency  String @default("USD")
-  status    WalletStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
-  transactions WalletTransaction[]
-  payouts   Payout[]
+  id             String @id @default(cuid())
+  userId         String @unique
+  user           User   @relation(fields: [userId], references: [id])
+  balanceCents   Int    @default(0)
+  currency       String @default("USD")
+  status         WalletStatus @default(ACTIVE)
+  createdAt      DateTime @default(now())
+  transactions   WalletTransaction[]
+  payouts        Payout[]
 }
 
 model Dataset {
   id           String @id @default(cuid())
-  sellerId      String
-  seller        User @relation(fields: [sellerId], references: [id])
+  sellerId     String
+  seller       User @relation(fields: [sellerId], references: [id])
   title        String
   category     String
   description  String
@@ -70,29 +70,29 @@ model Listing {
 }
 
 model Order {
-  id           String @id @default(cuid())
-  buyerId      String
-  buyer        User @relation(fields: [buyerId], references: [id])
-  datasetId    String
-  dataset      Dataset @relation(fields: [datasetId], references: [id])
-  listingId    String?
-  listing      Listing? @relation(fields: [listingId], references: [id])
-  totalCents   Int
-  currency     String @default("USD")
-  status       OrderStatus @default(PAID)
-  createdAt    DateTime @default(now())
+  id         String @id @default(cuid())
+  buyerId    String
+  buyer      User @relation(fields: [buyerId], references: [id])
+  datasetId  String
+  dataset    Dataset @relation(fields: [datasetId], references: [id])
+  listingId  String?
+  listing    Listing? @relation(fields: [listingId], references: [id])
+  totalCents Int
+  currency   String @default("USD")
+  status     OrderStatus @default(PAID)
+  createdAt  DateTime @default(now())
 }
 
 model WalletTransaction {
-  id            String @id @default(cuid())
-  walletId      String
-  wallet        WalletAccount @relation(fields: [walletId], references: [id])
-  type          TransactionType
-  amountCents   Int
-  currency      String @default("USD")
-  status        TransactionStatus @default(COMPLETED)
-  referenceId   String?
-  createdAt     DateTime @default(now())
+  id          String @id @default(cuid())
+  walletId    String
+  wallet      WalletAccount @relation(fields: [walletId], references: [id])
+  type        TransactionType
+  amountCents Int
+  currency    String @default("USD")
+  status      TransactionStatus @default(COMPLETED)
+  referenceId String?
+  createdAt   DateTime @default(now())
 }
 
 model SupplierResearchRecord {
@@ -113,19 +113,18 @@ model SupplierResearchRecord {
 }
 
 model Payout {
-  id                  String @id @default(cuid())
-  userId              String
-  user                User @relation(fields: [userId], references: [id])
-  walletAccountId     String
-  walletAccount       WalletAccount @relation(fields: [walletAccountId], references: [id])
-  amountCents         Int
-  method              PayoutMethod @default(BANK_TRANSFER)
-  destinationAccount  String
-  status              PayoutStatus @default(REQUESTED)
-  requestedAt         DateTime @default(now())
-  processedAt         DateTime?
+  id                 String @id @default(cuid())
+  userId             String
+  user               User @relation(fields: [userId], references: [id])
+  walletAccountId    String
+  walletAccount      WalletAccount @relation(fields: [walletAccountId], references: [id])
+  amountCents        Int
+  method             PayoutMethod @default(BANK_TRANSFER)
+  destinationAccount String
+  status             PayoutStatus @default(REQUESTED)
+  requestedAt        DateTime @default(now())
+  processedAt        DateTime?
 }
-
 
 model Lead {
   id              String       @id @default(cuid())
@@ -165,7 +164,16 @@ model LeadActivity {
   @@index([leadId, createdAt])
 }
 
-enum LeadStage {\n  NEW\n  QUALIFIED\n  CONTACTED\n  PROPOSAL\n  WON\n  LOST\n}\n\nenum UserRole {
+enum LeadStage {
+  NEW
+  QUALIFIED
+  CONTACTED
+  PROPOSAL
+  WON
+  LOST
+}
+
+enum UserRole {
   BUYER
   SELLER
   ADMIN
