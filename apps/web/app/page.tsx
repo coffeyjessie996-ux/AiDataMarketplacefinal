@@ -18,36 +18,43 @@ type Dataset = {
 };
 
 type Overview = {
-  totalRevenueCents: number;
+  recordedPaidOrderValueCents: number;
+  paidOrders: number;
+  publishedDatasets: number;
   totalDatasets: number;
-  activeOrders: number;
-  pendingPayouts: number;
-  platformLiquidityCents: number;
+  supplierResearchRecords: number;
+  latestSupplierRetrievedAt: string | null;
 };
 
 export default function HomePage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [datasetsRes, overviewRes] = await Promise.all([
-          fetch(`${API}/datasets`),
-          fetch(`${API}/admin/overview`, {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`, 
-            },
-          }),
+          fetch(`${API}/datasets`, { cache: 'no-store' }),
+          fetch(`${API}/marketplace/overview`, { cache: 'no-store' }),
         ]);
 
-        const datasetsJson = await datasetsRes.json();
-        const overviewJson = await overviewRes.json();
+        const datasetsJson = await datasetsRes.json().catch(() => ({}));
+        const overviewJson = await overviewRes.json().catch(() => ({}));
+        if (!datasetsRes.ok || !overviewRes.ok) {
+          throw new Error(
+            overviewJson.error ||
+            datasetsJson.error ||
+            'Live marketplace data is currently unavailable.',
+          );
+        }
         setDatasets(datasetsJson.datasets || []);
         setOverview(overviewJson.snapshot || null);
+        setDataError(null);
       } catch (error) {
         console.error('Failed to load marketplace data', error);
+        setDataError(error instanceof Error ? error.message : 'Live marketplace data is currently unavailable.');
       } finally {
         setLoading(false);
       }
@@ -67,6 +74,7 @@ export default function HomePage() {
             <a href="#catalog">Catalog</a>
             <a href="#automation">Automation</a>
             <a href="#money">Revenue</a>
+            <a href="/suppliers">Supplier research</a>
           </div>
           <a href="/dashboard" className="primary-button">Open dashboard</a>
         </nav>
@@ -76,7 +84,7 @@ export default function HomePage() {
             <span className="eyebrow">AI DATA MARKETPLACE</span>
             <h1>Search the web, clean the data, and sell it at scale.</h1>
             <p>
-              Discover market signals, normalize raw information, publish revenue-generating datasets, and cash out directly to bank accounts from a built-in wallet system.
+              Discover market signals, organize real supplier and business intelligence, and prepare datasets for marketplace sales. Payment processing and cashouts stay disabled until a verified provider is connected.
             </p>
             <div className="cta-row">
               <a href="#catalog" className="primary-button">Browse datasets</a>
@@ -86,21 +94,27 @@ export default function HomePage() {
 
           <div className="stat-card">
             <div className="stat-row">
-              <span>Revenue</span>
-              <strong>{overview ? formatMoney(overview.totalRevenueCents) : '$0.00'}</strong>
+              <span>Recorded paid order value</span>
+              <strong>{overview ? formatMoney(overview.recordedPaidOrderValueCents) : '—'}</strong>
             </div>
             <div className="stat-row">
-              <span>Datasets</span>
-              <strong>{overview?.totalDatasets ?? 0}</strong>
+              <span>Published datasets</span>
+              <strong>{overview?.publishedDatasets ?? '—'}</strong>
             </div>
             <div className="stat-row">
-              <span>Orders</span>
-              <strong>{overview?.activeOrders ?? 0}</strong>
+              <span>Paid orders recorded</span>
+              <strong>{overview?.paidOrders ?? '—'}</strong>
             </div>
             <div className="stat-row highlight">
-              <span>Payout ready</span>
-              <strong>{overview ? formatMoney(overview.platformLiquidityCents) : '$0.00'}</strong>
+              <span>Supplier research records</span>
+              <strong>{overview?.supplierResearchRecords ?? '—'}</strong>
             </div>
+            {dataError && (
+              <p className="marketplace-data-note" role="status" style={{ color: '#fbbf24' }}>
+                Live figures unavailable: {dataError}
+              </p>
+            )}
+            <p className="marketplace-data-note">Figures appear only when the connected database responds. Orders marked paid in the database are not proof that a payment processor settled funds. Checkout and payouts are currently disabled.</p>
           </div>
         </div>
       </section>

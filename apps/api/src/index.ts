@@ -29,6 +29,20 @@ app.use((req, _res, next) => {
   next();
 });
 
+function hasValidDatabaseUrl() {
+  const url = process.env.DATABASE_URL || '';
+  return url.startsWith('postgresql://') || url.startsWith('postgres://');
+}
+
+// Do not let a missing/invalid DATABASE_URL look like an empty, successful marketplace.
+// Keep /health available so deployment diagnostics can report the configuration state.
+app.use((req, res, next) => {
+  if (req.path === '/health' || hasValidDatabaseUrl()) return next();
+  return res.status(503).json({
+    error: 'Database not configured: set DATABASE_URL to a valid PostgreSQL connection string to load live marketplace figures.',
+  });
+});
+
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-this-secret';
 
 function makeUserToken(userId: string) {
@@ -177,7 +191,7 @@ const registerSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(6),
-  role: z.enum(['buyer', 'seller', 'admin']).default('buyer'),
+  role: z.enum(['buyer', 'seller']).default('buyer'),
 });
 
 const datasetSchema = z.object({
@@ -200,8 +214,36 @@ const payoutSchema = z.object({
   destinationAccount: z.string().min(4),
 });
 
+// Seed data is explicitly marked by its local-only email domain and sample labels.
+// Exclude it from public/live metrics so test rows cannot look like real sales.
+const nonDemoDatasetFilter = {
+  seller: { isNot: { email: { endsWith: '@local.test' } } },
+  title: { not: { contains: '(Sample)' } },
+};
+const nonDemoOrderFilter = {
+  buyer: { isNot: { email: { endsWith: '@local.test' } } },
+  dataset: {
+    is: {
+      seller: { isNot: { email: { endsWith: '@local.test' } } },
+      title: { not: { contains: '(Sample)' } },
+    },
+  },
+};
+const nonDemoPaidOrderFilter = nonDemoOrderFilter;
+const nonDemoPayoutFilter = {
+  user: { isNot: { email: { endsWith: '@local.test' } } },
+};
+const nonDemoUserFilter = {
+  email: { not: { endsWith: '@local.test' } },
+};
+
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'ai-data-marketplace-api', timestamp: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: 'ai-data-marketplace-api',
+    databaseConfigured: hasValidDatabaseUrl(),
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.post('/auth/register', async (req, res) => {
@@ -303,12 +345,17 @@ app.get('/users', requireAuth, requireRole(['admin']), async (_req, res) => {
 });
 
 app.get('/datasets', async (_req, res) => {
-  const datasets = await prisma.dataset.findMany({ orderBy: { createdAt: 'desc' } });
+  const datasets = await prisma.dataset.findMany({
+    where: { AND: [{ status: 'PUBLISHED' }, nonDemoDatasetFilter] },
+    orderBy: { createdAt: 'desc' },
+  });
   return res.json({ datasets: datasets.map(serializeDataset) });
 });
 
 app.get('/datasets/:id', async (req, res) => {
-  const dataset = await prisma.dataset.findUnique({ where: { id: req.params.id } });
+  const dataset = await prisma.dataset.findFirst({
+    where: { AND: [{ id: req.params.id, status: 'PUBLISHED' }, nonDemoDatasetFilter] },
+  });
   if (!dataset) return res.status(404).json({ error: 'Dataset not found.' });
   return res.json({ dataset: serializeDataset(dataset) });
 });
@@ -352,6 +399,11 @@ app.post('/scrapers/start', requireAuth, async (req, res) => {
         error: 'Provide at least one URL to scrape.',
       });
     }
+    if (urls.length > 20) {
+      return res.status(400).json({
+        error: 'Submit no more than 20 URLs per request.',
+      });
+    }
 
     const results = await scrapeSources(urls);
 
@@ -368,6 +420,152 @@ app.post('/scrapers/start', requireAuth, async (req, res) => {
   }
 });
 
+
+// Public-source supplier intelligence: US federal contract awards from USAspending.gov.
+// Results retain the official source URL and retrieval timestamp; this endpoint does not
+// claim that records are independently verified or that a sale has occurred.
+app.get('/research/suppliers/federal-awards', requireAuth, async (req, res) => {
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const today = new Date();
+  const defaultEnd = today.toISOString().slice(0, 10);
+  const defaultStartDate = new Date(today);
+  defaultStartDate.setUTCDate(defaultStartDate.getUTCDate() - 90);
+  const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : defaultStartDate.toISOString().slice(0, 10);
+  const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : defaultEnd;
+  const requestedLimit = Number(req.query.limit ?? 50);
+  const limit = Number.isInteger(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 50;
+
+  if (!datePattern.test(startDate) || !datePattern.test(endDate) || startDate > endDate) {
+    return res.status(400).json({ error: 'Use valid YYYY-MM-DD startDate and endDate values, with startDate no later than endDate.' });
+  }
+
+  try {
+    const response = await fetch('https://api.usaspending.gov/api/v2/search/spending_by_award/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({
+        filters: {
+          time_period: [{ start_date: startDate, end_date: endDate }],
+          award_type_codes: ['A', 'B', 'C', 'D'],
+        },
+        fields: [
+          'Award ID', 'Recipient Name', 'Award Amount', 'Start Date', 'End Date',
+          'Awarding Agency', 'Description', 'Place of Performance State Code', 'NAICS', 'Recipient UEI',
+        ],
+        page: 1,
+        limit,
+        sort: 'Award Amount',
+        order: 'desc',
+      }),
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({ error: 'USAspending.gov returned an error.', sourceStatus: response.status });
+    }
+
+    const payload = await response.json() as { results?: Array<Record<string, unknown>>; page_metadata?: unknown };
+    const sourceValue = (row: Record<string, unknown>, label: string, normalized: string) => row[label] ?? row[normalized] ?? null;
+    const retrievedAt = new Date().toISOString();
+    const records = (Array.isArray(payload.results) ? payload.results : []).map((row) => ({
+      awardId: sourceValue(row, 'Award ID', 'award_id'),
+      supplierName: sourceValue(row, 'Recipient Name', 'recipient_name'),
+      awardAmount: sourceValue(row, 'Award Amount', 'award_amount'),
+      startDate: sourceValue(row, 'Start Date', 'start_date'),
+      endDate: sourceValue(row, 'End Date', 'end_date'),
+      awardingAgency: sourceValue(row, 'Awarding Agency', 'awarding_agency_name'),
+      description: sourceValue(row, 'Description', 'description'),
+      performanceState: sourceValue(row, 'Place of Performance State Code', 'place_of_performance_state_code'),
+      naics: sourceValue(row, 'NAICS', 'naics'),
+      supplierUei: sourceValue(row, 'Recipient UEI', 'recipient_uei'),
+      sourceUrl: 'https://www.usaspending.gov/',
+      retrievedAt,
+    }));
+
+    let persistedCount = 0;
+    for (const record of records) {
+      const sourceRecordId = String(record.awardId ?? '').trim();
+      if (!sourceRecordId) continue;
+
+      const amount = Number(record.awardAmount);
+      await prisma.supplierResearchRecord.upsert({
+        where: {
+          source_sourceRecordId: {
+            source: 'usaspending.gov',
+            sourceRecordId,
+          },
+        },
+        create: {
+          source: 'usaspending.gov',
+          sourceRecordId,
+          supplierName: typeof record.supplierName === 'string' ? record.supplierName : null,
+          awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
+          sourceUrl: String(record.sourceUrl),
+          payload: record as any,
+          retrievedAt: new Date(retrievedAt),
+        },
+        update: {
+          supplierName: typeof record.supplierName === 'string' ? record.supplierName : null,
+          awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
+          sourceUrl: String(record.sourceUrl),
+          payload: record as any,
+          retrievedAt: new Date(retrievedAt),
+        },
+      });
+      persistedCount += 1;
+    }
+
+    return res.json({
+      source: 'USAspending.gov',
+      sourceUrl: 'https://api.usaspending.gov/api/v2/search/spending_by_award/',
+      retrievedAt,
+      dateRange: { startDate, endDate },
+      count: records.length,
+      persistedCount,
+      records,
+      note: 'Public federal award data for supplier research. Check the source record before making commercial decisions; results are not independently verified and are not saved as a marketplace product by this endpoint.',
+    });
+  } catch (error) {
+    console.error('USAspending supplier research failed', error);
+    return res.status(502).json({ error: 'Unable to retrieve supplier records from USAspending.gov right now.' });
+  }
+});
+
+app.get('/research/suppliers/federal-awards/saved', requireAuth, async (req, res) => {
+  const requestedLimit = Number(req.query.limit ?? 50);
+  const limit = Number.isInteger(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 50;
+  const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+
+  try {
+    const records = await prisma.supplierResearchRecord.findMany({
+      where: {
+        source: 'usaspending.gov',
+        ...(search ? { supplierName: { contains: search, mode: 'insensitive' as const } } : {}),
+      },
+      orderBy: { retrievedAt: 'desc' },
+      take: limit,
+    });
+
+    return res.json({
+      source: 'USAspending.gov',
+      count: records.length,
+      records: records.map((record) => ({
+        id: record.id,
+        source: record.source,
+        sourceRecordId: record.sourceRecordId,
+        supplierName: record.supplierName,
+        awardAmount: record.awardAmount?.toString() ?? null,
+        sourceUrl: record.sourceUrl,
+        payload: record.payload,
+        retrievedAt: record.retrievedAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('Saved supplier research lookup failed', error);
+    return res.status(500).json({ error: 'Unable to read saved supplier records.' });
+  }
+});
+
 app.get('/wallet', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
   if (!user) return res.status(404).json({ error: 'User not found.' });
@@ -376,113 +574,341 @@ app.get('/wallet', requireAuth, async (req, res) => {
   return res.json({ wallet: wallet ? serializeWallet(wallet) : null });
 });
 
-app.post('/wallet/payout', requireAuth, async (req, res) => {
-  const parsed = payoutSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-
-  const user = (req as express.Request & { user?: User }).user;
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-
-  const wallet = await prisma.walletAccount.findUnique({ where: { userId: user.id } });
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found.' });
-  if (wallet.balanceCents < parsed.data.amountCents) {
-    return res.status(400).json({ error: 'Insufficient wallet balance.' });
-  }
-
-  const updatedWallet = await prisma.walletAccount.update({
-    where: { id: wallet.id },
-    data: { balanceCents: wallet.balanceCents - parsed.data.amountCents },
-  });
-
-  const payout = await prisma.payout.create({
-    data: {
-      userId: user.id,
-      walletAccountId: wallet.id,
-      amountCents: parsed.data.amountCents,
-      method: parsed.data.method.toUpperCase() as any,
-      destinationAccount: parsed.data.destinationAccount,
-      status: 'REQUESTED',
-    },
-  });
-
-  return res.status(201).json({
-    payout: serializePayout(payout),
-    wallet: serializeWallet(updatedWallet),
+app.post('/wallet/payout', requireAuth, async (_req, res) => {
+  // Payout integrations are currently simulated. Do not debit wallets or imply money will be sent.
+  return res.status(503).json({
+    error: 'Payouts are not enabled yet. A verified payout provider integration is required.',
   });
 });
 
-app.post('/orders', requireAuth, async (req, res) => {
-  const schema = z.object({ datasetId: z.string() });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
+app.post('/orders', requireAuth, async (_req, res) => {
+  // The current wallet flow is not backed by a verified payment processor.
+  // Block it rather than recording an order as PAID without a real payment.
+  return res.status(503).json({
+    error: 'Checkout is not enabled yet. A verified payment integration is required before purchases can be completed.',
+  });
+});
 
+// Public marketplace figures come from persisted database records only.
+app.get('/marketplace/overview', async (_req, res) => {
+  try {
+    const [
+      paidOrderValue,
+      paidOrders,
+      publishedDatasets,
+      totalDatasets,
+      supplierResearchRecords,
+      latestSupplierRecord,
+    ] = await Promise.all([
+      prisma.order.aggregate({
+        _sum: { totalCents: true },
+        where: { AND: [{ status: 'PAID' }, nonDemoPaidOrderFilter] },
+      }),
+      prisma.order.count({ where: { AND: [{ status: 'PAID' }, nonDemoPaidOrderFilter] } }),
+      prisma.dataset.count({ where: { AND: [{ status: 'PUBLISHED' }, nonDemoDatasetFilter] } }),
+      prisma.dataset.count({ where: nonDemoDatasetFilter }),
+      prisma.supplierResearchRecord.count(),
+      prisma.supplierResearchRecord.findFirst({
+        orderBy: { retrievedAt: 'desc' },
+        select: { retrievedAt: true },
+      }),
+    ]);
+
+    return res.json({
+      source: 'database',
+      updatedAt: new Date().toISOString(),
+      // These are database records, not confirmation of a processed payment.
+      paymentProcessingEnabled: false,
+      snapshot: {
+        recordedPaidOrderValueCents: Number(paidOrderValue._sum.totalCents ?? 0),
+        paidOrders,
+        publishedDatasets,
+        totalDatasets,
+        supplierResearchRecords,
+        latestSupplierRetrievedAt: latestSupplierRecord?.retrievedAt.toISOString() ?? null,
+      },
+    });
+  } catch (error) {
+    console.error('Marketplace overview failed', error);
+    return res.status(500).json({ error: 'Unable to load marketplace figures from the database.' });
+  }
+});
+
+// Authenticated dashboard figures are scoped to the signed-in account, except for admins.
+app.get('/dashboard/overview', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
-  if (!user) return res.status(404).json({ error: 'User not found.' });
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
 
-  const dataset = await prisma.dataset.findUnique({ where: { id: parsed.data.datasetId } });
-  if (!dataset) return res.status(404).json({ error: 'Dataset not found.' });
-  if (dataset.sellerId === user.id) {
-    return res.status(400).json({ error: 'Sellers cannot buy their own dataset.' });
-  }
+  const isAdmin = user.role === 'admin';
+  const isTestAccount = user.email.toLowerCase().endsWith('@local.test');
+  const orderScope: any = isAdmin
+    ? {}
+    : user.role === 'seller'
+      ? { dataset: { sellerId: user.id } }
+      : { buyerId: user.id };
+  const paidOrderWhere: any = {
+    AND: [{ status: 'PAID' }, orderScope, nonDemoPaidOrderFilter],
+  };
 
-  const buyerWallet = await prisma.walletAccount.findUnique({ where: { userId: user.id } });
-  if (!buyerWallet || buyerWallet.balanceCents < dataset.priceCents) {
-    return res.status(400).json({ error: 'Buyer wallet balance is insufficient.' });
-  }
+  const datasetScope: any = isAdmin
+    ? {}
+    : user.role === 'seller'
+      ? { sellerId: user.id }
+      : { status: 'PUBLISHED' };
+  const datasetWhere: any = { AND: [datasetScope, nonDemoDatasetFilter] };
 
-  const sellerWallet = await prisma.walletAccount.findUnique({ where: { userId: dataset.sellerId } });
-  const platformWallet = await prisma.walletAccount.findFirst({ where: { userId: 'platform' } });
+  const publishedDatasetScope: any = user.role === 'seller'
+    ? { sellerId: user.id, status: 'PUBLISHED' }
+    : { status: 'PUBLISHED' };
+  const publishedDatasetWhere: any = {
+    AND: [publishedDatasetScope, nonDemoDatasetFilter],
+  };
 
-  const sellerShare = Math.round(dataset.priceCents * 0.85);
-  const platformShare = dataset.priceCents - sellerShare;
+  const payoutScope: any = isAdmin ? {} : { userId: user.id };
+  const payoutWhere: any = {
+    AND: [
+      payoutScope,
+      nonDemoPayoutFilter,
+      { status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] } },
+    ],
+  };
 
-  const updatedBuyerWallet = await prisma.walletAccount.update({
-    where: { id: buyerWallet.id },
-    data: { balanceCents: buyerWallet.balanceCents - dataset.priceCents },
-  });
+  try {
+    const [
+      wallet,
+      totalDatasets,
+      publishedDatasets,
+      paidOrderValue,
+      paidOrders,
+      pendingPayouts,
+      supplierResearchRecords,
+      latestSupplierRecord,
+      recentOrders,
+      recentSupplierRecords,
+      userCount,
+    ] = await Promise.all([
+      prisma.walletAccount.findUnique({ where: { userId: user.id } }),
+      prisma.dataset.count({ where: datasetWhere }),
+      prisma.dataset.count({ where: publishedDatasetWhere }),
+      prisma.order.aggregate({ _sum: { totalCents: true }, where: paidOrderWhere }),
+      prisma.order.count({ where: paidOrderWhere }),
+      prisma.payout.count({ where: payoutWhere }),
+      prisma.supplierResearchRecord.count(),
+      prisma.supplierResearchRecord.findFirst({
+        orderBy: { retrievedAt: 'desc' },
+        select: { retrievedAt: true },
+      }),
+      prisma.order.findMany({
+        where: paidOrderWhere,
+        include: { dataset: { select: { title: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 6,
+      }),
+      prisma.supplierResearchRecord.findMany({
+        orderBy: { retrievedAt: 'desc' },
+        select: {
+          id: true,
+          source: true,
+          supplierName: true,
+          awardAmount: true,
+          sourceUrl: true,
+          retrievedAt: true,
+        },
+        take: 5,
+      }),
+      isAdmin ? prisma.user.count({ where: nonDemoUserFilter }) : Promise.resolve(null),
+    ]);
 
-  if (sellerWallet) {
-    await prisma.walletAccount.update({
-      where: { id: sellerWallet.id },
-      data: { balanceCents: sellerWallet.balanceCents + sellerShare },
+    return res.json({
+      source: 'database',
+      updatedAt: new Date().toISOString(),
+      role: user.role,
+      testAccount: isTestAccount,
+      paymentProcessingEnabled: false,
+      snapshot: {
+        walletBalanceCents: isTestAccount ? 0 : (wallet?.balanceCents ?? 0),
+        totalDatasets,
+        publishedDatasets,
+        recordedPaidOrderValueCents: Number(paidOrderValue._sum.totalCents ?? 0),
+        paidOrders,
+        pendingPayouts,
+        supplierResearchRecords,
+        latestSupplierRetrievedAt: latestSupplierRecord?.retrievedAt.toISOString() ?? null,
+        userCount,
+      },
+      recentOrders: recentOrders.map((order) => ({
+        id: order.id,
+        datasetTitle: order.dataset.title,
+        totalCents: order.totalCents,
+        currency: order.currency,
+        status: order.status.toLowerCase(),
+        createdAt: order.createdAt.toISOString(),
+      })),
+      recentSupplierRecords: recentSupplierRecords.map((record) => ({
+        id: record.id,
+        source: record.source,
+        supplierName: record.supplierName,
+        awardAmount: record.awardAmount?.toString() ?? null,
+        sourceUrl: record.sourceUrl,
+        retrievedAt: record.retrievedAt.toISOString(),
+      })),
     });
+  } catch (error) {
+    console.error('Dashboard overview failed', error);
+    return res.status(500).json({ error: 'Unable to load live dashboard figures from the database.' });
   }
+});
 
-  if (platformWallet) {
-    await prisma.walletAccount.update({
-      where: { id: platformWallet.id },
-      data: { balanceCents: platformWallet.balanceCents + platformShare },
+// Role-scoped dashboard detail endpoints use stored records; no local demo data is returned.
+app.get('/dashboard/datasets', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+
+  const scope: any = user.role === 'admin'
+    ? {}
+    : user.role === 'seller'
+      ? { sellerId: user.id }
+      : { status: 'PUBLISHED' };
+  try {
+    const datasets = await prisma.dataset.findMany({
+      where: { AND: [scope, nonDemoDatasetFilter] },
+      orderBy: { createdAt: 'desc' },
     });
+    return res.json({ datasets: datasets.map(serializeDataset) });
+  } catch (error) {
+    console.error('Dashboard datasets failed', error);
+    return res.status(500).json({ error: 'Unable to load datasets from the database.' });
   }
+});
 
-  const order = await prisma.order.create({
-    data: {
-      buyerId: user.id,
-      datasetId: dataset.id,
-      totalCents: dataset.priceCents,
-      currency: 'USD',
-      status: 'PAID',
-    },
-  });
+app.get('/dashboard/orders', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
 
-  return res.status(201).json({
-    order: {
-      id: order.id,
-      buyerId: order.buyerId,
-      datasetId: order.datasetId,
-      totalCents: order.totalCents,
-      currency: order.currency,
-      status: order.status.toLowerCase(),
-      createdAt: order.createdAt.toISOString(),
-    },
-    buyerWallet: serializeWallet(updatedBuyerWallet),
-    sellerWallet: sellerWallet ? serializeWallet(sellerWallet) : null,
-    platformWallet: platformWallet ? serializeWallet(platformWallet) : null,
-  });
+  const scope: any = user.role === 'admin'
+    ? {}
+    : user.role === 'seller'
+      ? { dataset: { sellerId: user.id } }
+      : { buyerId: user.id };
+  try {
+    const orders = await prisma.order.findMany({
+      where: { AND: [scope, nonDemoOrderFilter] },
+      include: { dataset: { select: { title: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    return res.json({
+      orders: orders.map((order) => ({
+        id: order.id,
+        datasetTitle: order.dataset.title,
+        totalCents: order.totalCents,
+        currency: order.currency,
+        status: order.status.toLowerCase(),
+        createdAt: order.createdAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('Dashboard orders failed', error);
+    return res.status(500).json({ error: 'Unable to load orders from the database.' });
+  }
+});
+
+app.get('/dashboard/payouts', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+
+  const scope: any = user.role === 'admin' ? {} : { userId: user.id };
+  try {
+    const payouts = await prisma.payout.findMany({
+      where: { AND: [scope, nonDemoPayoutFilter] },
+      orderBy: { requestedAt: 'desc' },
+      take: 100,
+    });
+    return res.json({ payouts: payouts.map(serializePayout) });
+  } catch (error) {
+    console.error('Dashboard payouts failed', error);
+    return res.status(500).json({ error: 'Unable to load payout requests from the database.' });
+  }
+});
+
+// Admin-only diagnostic: inspect the exact PostgreSQL role used by this API connection.
+ // Never returns connection strings, credentials, or role names.
+app.get('/admin/database-security-check', requireAuth, requireRole(['admin']), async (_req, res) => {
+  try {
+    const rows = await prisma.$queryRaw<Array<{
+      isSuperuser: boolean;
+      bypassRls: boolean;
+      tableName: string;
+      tableExists: boolean;
+      rlsEnabled: boolean;
+      forceRls: boolean;
+      isTableOwner: boolean;
+      canSelect: boolean;
+      canInsert: boolean;
+      canUpdate: boolean;
+      canDelete: boolean;
+    }>>`
+      SELECT
+        role.rolsuper AS "isSuperuser",
+        role.rolbypassrls AS "bypassRls",
+        requested.table_name AS "tableName",
+        (table_info.oid IS NOT NULL) AS "tableExists",
+        COALESCE(table_info.relrowsecurity, false) AS "rlsEnabled",
+        COALESCE(table_info.relforcerowsecurity, false) AS "forceRls",
+        COALESCE(table_info.relowner = role.oid, false) AS "isTableOwner",
+        COALESCE(has_table_privilege(current_user, table_info.oid, 'SELECT'), false) AS "canSelect",
+        COALESCE(has_table_privilege(current_user, table_info.oid, 'INSERT'), false) AS "canInsert",
+        COALESCE(has_table_privilege(current_user, table_info.oid, 'UPDATE'), false) AS "canUpdate",
+        COALESCE(has_table_privilege(current_user, table_info.oid, 'DELETE'), false) AS "canDelete"
+      FROM pg_roles AS role
+      CROSS JOIN (VALUES
+        ('User'),
+        ('WalletAccount'),
+        ('Dataset'),
+        ('Listing'),
+        ('Order'),
+        ('WalletTransaction'),
+        ('SupplierResearchRecord'),
+        ('Payout'),
+        ('Lead'),
+        ('LeadActivity')
+      ) AS requested(table_name)
+      LEFT JOIN pg_class AS table_info
+        ON table_info.relname = requested.table_name
+       AND table_info.relnamespace = 'public'::regnamespace
+       AND table_info.relkind IN ('r', 'p')
+      WHERE role.rolname = current_user
+      ORDER BY requested.table_name
+    `;
+
+    const role = rows[0];
+    const tableChecks = rows.map((table) => ({
+      table: table.tableName,
+      exists: table.tableExists,
+      rlsEnabled: table.rlsEnabled,
+      forceRls: table.forceRls,
+      isTableOwner: table.isTableOwner,
+      canSelect: table.canSelect,
+      canInsert: table.canInsert,
+      canUpdate: table.canUpdate,
+      canDelete: table.canDelete,
+      canOperateWithRls: table.tableExists && (
+        role.isSuperuser ||
+        role.bypassRls ||
+        (table.isTableOwner && !table.forceRls)
+      ),
+    }));
+
+    return res.json({
+      source: 'current_api_database_connection',
+      roleCanBypassRls: Boolean(role?.isSuperuser || role?.bypassRls),
+      tables: tableChecks,
+      note: 'Run this diagnostic using an administrator account. It does not reveal credentials or modify database state.',
+    });
+  } catch (error) {
+    console.error('Database security diagnostic failed', error);
+    return res.status(500).json({ error: 'Unable to inspect the API database connection permissions.' });
+  }
 });
 
 app.get('/admin/overview', requireAuth, requireRole(['admin']), async (_req, res) => {
@@ -496,18 +922,19 @@ app.get('/admin/overview', requireAuth, requireRole(['admin']), async (_req, res
     pendingPayouts,
     platformLiquidity,
   ] = await Promise.all([
-    prisma.dataset.findMany({ orderBy: { createdAt: 'desc' } }),
-    prisma.order.findMany({ orderBy: { createdAt: 'desc' } }),
-    prisma.payout.findMany({ orderBy: { requestedAt: 'desc' } }),
-    prisma.user.findMany({ orderBy: { createdAt: 'desc' } }),
+    prisma.dataset.findMany({ where: nonDemoDatasetFilter, orderBy: { createdAt: 'desc' } }),
+    prisma.order.findMany({ where: nonDemoPaidOrderFilter, orderBy: { createdAt: 'desc' } }),
+    prisma.payout.findMany({ where: nonDemoPayoutFilter, orderBy: { requestedAt: 'desc' } }),
+    prisma.user.findMany({ where: nonDemoUserFilter, orderBy: { createdAt: 'desc' } }),
     prisma.order.aggregate({
       _sum: { totalCents: true },
-      where: { status: 'PAID' },
+      where: { AND: [{ status: 'PAID' }, nonDemoPaidOrderFilter] },
     }),
-    prisma.order.count({ where: { status: 'PAID' } }),
-    prisma.payout.count({ where: { status: { not: 'COMPLETED' } } }),
+    prisma.order.count({ where: { AND: [{ status: 'PAID' }, nonDemoPaidOrderFilter] } }),
+    prisma.payout.count({ where: { AND: [{ status: { in: ['REQUESTED', 'PROCESSING', 'APPROVED'] } }, nonDemoPayoutFilter] } }),
     prisma.walletAccount.aggregate({
       _sum: { balanceCents: true },
+      where: { user: { isNot: { email: { endsWith: '@local.test' } } } },
     }),
   ]);
 
