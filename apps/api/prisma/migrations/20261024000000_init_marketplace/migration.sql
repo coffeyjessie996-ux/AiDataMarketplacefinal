@@ -70,7 +70,7 @@ CREATE TABLE "Order" (
     "listingId" TEXT,
     "totalCents" INTEGER NOT NULL,
     "currency" TEXT NOT NULL DEFAULT 'USD',
-    "status" "OrderStatus" NOT NULL DEFAULT 'PAID',
+    "status" "OrderStatus" NOT NULL DEFAULT 'PENDING',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "Order_pkey" PRIMARY KEY ("id")
 );
