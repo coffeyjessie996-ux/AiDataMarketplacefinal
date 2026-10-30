@@ -51,7 +51,7 @@ export default function PipelinePage() {
       const response = await fetch(`${API}/pipeline/leads/import-suppliers`, { method: 'POST', headers: headers(), body: '{}' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Supplier import failed.');
-      setMessage(`Reviewed ${data.sourceRecordsReviewed} saved supplier records; ${data.leadsCreatedOrExisting} leads created or already present.`);
+      setMessage(`Reviewed ${data.recordsReviewed} saved supplier records; ${data.leadsCreatedOrExisting} leads created or already present.`);
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : 'Supplier import failed.'); }
     finally { setBusy(false); }
