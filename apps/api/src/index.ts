@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { scrapeSources } from './services/scraper';
 import { prisma } from './lib/prisma';
 import { User } from './types';
+import { createPipelineRouter } from './routes/pipeline';
 
 dotenv.config();
 
@@ -186,6 +187,8 @@ function requireRole(roles: string[]) {
     next();
   };
 }
+
+app.use('/pipeline', createPipelineRouter(prisma, requireAuth));
 
 const registerSchema = z.object({
   name: z.string().min(2),
