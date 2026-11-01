@@ -76,7 +76,10 @@ export default function HomePage() {
             <a href="#money">Revenue</a>
             <a href="/suppliers">Supplier research</a>
           </div>
-          <a href="/dashboard" className="primary-button">Open dashboard</a>
+          <div className="auth-nav">
+            <a href="/login" className="secondary-button">Sign in</a>
+            <a href="/register" className="primary-button">Create account</a>
+          </div>
         </nav>
 
         <div className="hero-grid">
