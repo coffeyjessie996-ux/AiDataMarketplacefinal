@@ -3,7 +3,7 @@ import * as Sentry from '@sentry/node';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
@@ -390,35 +390,77 @@ app.post('/datasets', requireAuth, requireRole(['seller', 'admin']), async (req,
   return res.status(201).json({ dataset: serializeDataset(dataset) });
 });
 
-// Scraper endpoint - accepts array of URLs and returns scraped snippets
+// Public-page research ingestion. Successful snapshots are persisted for later
+// deduplication, quality review, and dataset curation; they are NOT auto-published.
 app.post('/scrapers/start', requireAuth, async (req, res) => {
+  const requestSchema = z.object({
+    urls: z.array(z.string().url().max(2048)).min(1).max(20),
+  });
+  const parsed = requestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: 'Provide between 1 and 20 valid public HTTP/HTTPS URLs.',
+      details: parsed.error.flatten(),
+    });
+  }
+
   try {
-    const urls = Array.isArray(req.body?.urls)
-      ? req.body.urls.filter((url: unknown): url is string => typeof url === 'string')
-      : [];
+    const results = await scrapeSources(parsed.data.urls);
+    const successfulResults = results.filter(
+      (record): record is typeof record & { sourceUrl: string; textSnippet: string } =>
+        typeof record.sourceUrl === 'string' &&
+        typeof record.textSnippet === 'string' &&
+        !('error' in record),
+    );
 
-    if (urls.length === 0) {
-      return res.status(400).json({
-        error: 'Provide at least one URL to scrape.',
-      });
-    }
-    if (urls.length > 20) {
-      return res.status(400).json({
-        error: 'Submit no more than 20 URLs per request.',
-      });
-    }
+    const saved = await Promise.all(successfulResults.map(async (record) => {
+      const sourceRecordId = createHash('sha256')
+        .update(record.sourceUrl)
+        .digest('hex');
+      const payload = JSON.parse(JSON.stringify({
+        title: record.title,
+        textSnippet: record.textSnippet,
+        contentType: record.contentType,
+        status: record.status,
+        fetchedAt: record.fetchedAt,
+        extractionMethod: record.extractionMethod,
+      }));
 
-    const results = await scrapeSources(urls);
+      return prisma.supplierResearchRecord.upsert({
+        where: {
+          source_sourceRecordId: {
+            source: 'public_web_scrape',
+            sourceRecordId,
+          },
+        },
+        create: {
+          source: 'public_web_scrape',
+          sourceRecordId,
+          sourceUrl: record.sourceUrl,
+          payload,
+        },
+        update: {
+          sourceUrl: record.sourceUrl,
+          payload,
+          retrievedAt: new Date(),
+        },
+        select: { id: true },
+      });
+    }));
 
     return res.status(200).json({
       success: true,
-      count: results.length,
+      requested: parsed.data.urls.length,
+      scraped: results.length,
+      saved: saved.length,
+      failed: results.length - successfulResults.length,
       results,
+      note: 'Successful public-page snapshots are saved for review. They are not verified supplier contacts or published products.',
     });
   } catch (error) {
-    console.error('Scraper failed', error);
+    console.error('Scraper ingestion failed', error);
     return res.status(500).json({
-      error: 'Scraper failed.',
+      error: 'Scraper ingestion failed. No dataset was published.',
     });
   }
 });

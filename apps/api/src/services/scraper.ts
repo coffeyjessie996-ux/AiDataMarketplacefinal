@@ -1,3 +1,4 @@
+import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 export type ScrapedRecord = Record<string, unknown>;
@@ -44,16 +45,14 @@ function isPrivateOrLocalAddress(hostname: string): boolean {
       host.startsWith('fe9') ||
       host.startsWith('fea') ||
       host.startsWith('feb') ||
-      host.startsWith('::ffff:127.') ||
-      host.startsWith('::ffff:10.') ||
-      host.startsWith('::ffff:192.168.')
+      (host.startsWith('::ffff:') && isPrivateOrLocalAddress(host.slice(7)))
     );
   }
 
   return false;
 }
 
-function validatePublicHttpUrl(rawUrl: string): URL {
+async function validatePublicHttpUrl(rawUrl: string): Promise<URL> {
   if (rawUrl.length > 2048) throw new Error('URL is too long.');
 
   let parsed: URL;
@@ -71,6 +70,20 @@ function validatePublicHttpUrl(rawUrl: string): URL {
   }
   if (isPrivateOrLocalAddress(parsed.hostname)) {
     throw new Error('Local and private network addresses cannot be scraped.');
+  }
+
+  // Reject hostnames that resolve to any non-public address before fetching.
+  // Redirects are disabled below so a public URL cannot redirect into a private network.
+  if (!isIP(parsed.hostname)) {
+    let addresses: Array<{ address: string; family: number }>;
+    try {
+      addresses = await lookup(parsed.hostname, { all: true, verbatim: true });
+    } catch {
+      throw new Error('The hostname could not be resolved.');
+    }
+    if (addresses.length === 0 || addresses.some(({ address }) => isPrivateOrLocalAddress(address))) {
+      throw new Error('Hostnames resolving to local or private network addresses cannot be scraped.');
+    }
   }
 
   return parsed;
@@ -146,7 +159,7 @@ export async function scrapeSources(inputUrls: string[]) {
 
   for (const rawUrl of urls) {
     try {
-      const url = validatePublicHttpUrl(rawUrl);
+      const url = await validatePublicHttpUrl(rawUrl);
       const response = await fetch(url, {
         headers: {
           'user-agent': 'AI-Data-Marketplace/1.0 (+public business research)',
