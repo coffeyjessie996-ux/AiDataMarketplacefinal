@@ -7,7 +7,8 @@ const stages = ['NEW', 'QUALIFIED', 'CONTACTED', 'PROPOSAL', 'WON', 'LOST'];
 
 type Lead = {
   id: string; companyName: string; source: string; sourceRecordId?: string | null;
-  email?: string | null; website?: string | null; score: number; stage: string;
+  email?: string | null; website?: string | null; description?: string | null;
+  awardAmount?: string | number | null; score: number; stage: string;
   notes?: string | null; nextFollowUpAt?: string | null; updatedAt: string;
 };
 
@@ -78,6 +79,26 @@ export default function PipelinePage() {
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not update stage.'); }
   };
 
+  const changeFollowUp = async (lead: Lead, date: string) => {
+    setError('');
+    try {
+      const response = await fetch(`${API}/pipeline/leads/${lead.id}`, {
+        method: 'PATCH', headers: headers(),
+        body: JSON.stringify({ nextFollowUpAt: date ? new Date(`${date}T12:00:00`).toISOString() : null }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not save follow-up date.');
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not save follow-up date.'); }
+  };
+
+  const money = (value: Lead['awardAmount']) => {
+    const amount = typeof value === 'number' ? value : Number(value);
+    return value == null || value === '' || !Number.isFinite(amount)
+      ? 'Not provided'
+      : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount);
+  };
+
   return <main style={{ minHeight: '100vh', padding: 24, background: '#0b1220', color: '#e5edf8' }}>
     <div style={{ maxWidth: 1180, margin: '0 auto' }}>
       <nav style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
@@ -106,14 +127,15 @@ export default function PipelinePage() {
       <section style={{ border: '1px solid #26364d', borderRadius: 12, overflow: 'hidden', background: '#101a2b' }}>
         <div style={{ padding: 14, borderBottom: '1px solid #26364d' }}>Lead records ({leads.length})</div>
         {leads.length === 0 ? <p style={{ padding: 18, color: '#94a3b8' }}>No leads yet. Fetch federal award records in Supplier Research, then import them here.</p> :
-          <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
-            <thead><tr style={{ textAlign: 'left', color: '#93a4bd' }}>{['Company','Source','Priority score','Stage','Follow-up'].map(x => <th key={x} style={{ padding: 12 }}>{x}</th>)}</tr></thead>
+          <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', minWidth: 1040, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: '#93a4bd' }}>{['Company & award details','Award amount','Contact details','Priority score','Stage','Next follow-up'].map(x => <th key={x} style={{ padding: 12 }}>{x}</th>)}</tr></thead>
             <tbody>{leads.map(lead => <tr key={lead.id}>
-              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><strong>{lead.companyName}</strong><div style={{ fontSize: 12, color: '#93a4bd' }}>{lead.email || lead.website || lead.sourceRecordId || ''}</div></td>
-              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>{lead.source}</td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 260 }}><strong>{lead.companyName}</strong><div style={{ fontSize: 12, color: '#93a4bd', marginTop: 4 }}>{lead.description || 'No additional award details supplied.'}</div><div style={{ fontSize: 11, color: '#8291a7', marginTop: 4 }}>Source: {lead.source} · Record: {lead.sourceRecordId || 'not supplied'}</div></td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d', whiteSpace: 'nowrap' }}>{money(lead.awardAmount)}</td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}>{lead.email ? <a href={`mailto:${lead.email}`} style={{ color: '#93c5fd' }}>{lead.email}</a> : lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: '#93c5fd' }}>Company website</a> : <span style={{ color: '#fbbf24' }}>Not provided by source</span>}</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>{lead.score}/100</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><select value={lead.stage} onChange={e => void changeStage(lead,e.target.value)} style={{ padding: 8, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }}>{stages.map(s => <option key={s} value={s}>{s}</option>)}</select></td>
-              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>{lead.nextFollowUpAt ? new Date(lead.nextFollowUpAt).toLocaleDateString() : 'Not scheduled'}</td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><input aria-label={`Follow-up date for ${lead.companyName}`} type="date" value={lead.nextFollowUpAt ? lead.nextFollowUpAt.slice(0,10) : ''} onChange={e => void changeFollowUp(lead,e.target.value)} style={{ padding: 7, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }} /></td>
             </tr>)}</tbody>
           </table></div>}
       </section>
