@@ -52,13 +52,32 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       if (!name) continue;
       const amount = Number(record.awardAmount ?? 0);
       const score = amount >= 1000000 ? 85 : amount >= 250000 ? 75 : amount >= 50000 ? 65 : amount >= 10000 ? 55 : 40;
+      const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+        ? record.payload as Record<string, unknown> : {};
+      const value = (...keys: string[]) => {
+        for (const key of keys) {
+          const candidate = payload[key];
+          if (candidate !== undefined && candidate !== null && String(candidate).trim()) return String(candidate).trim();
+        }
+        return '';
+      };
+      const detailParts = [
+        value('awardingAgency', 'Awarding Agency', 'awarding_agency_name') && `Agency: ${value('awardingAgency', 'Awarding Agency', 'awarding_agency_name')}`,
+        value('performanceState', 'Place of Performance State Code', 'place_of_performance_state_code') && `Performance state: ${value('performanceState', 'Place of Performance State Code', 'place_of_performance_state_code')}`,
+        value('naics', 'NAICS', 'naics') && `NAICS: ${value('naics', 'NAICS', 'naics')}`,
+        value('supplierUei', 'Recipient UEI', 'recipient_uei') && `UEI: ${value('supplierUei', 'Recipient UEI', 'recipient_uei')}`,
+        value('startDate', 'Start Date', 'start_date') && `Start date: ${value('startDate', 'Start Date', 'start_date')}`,
+        value('endDate', 'End Date', 'end_date') && `End date: ${value('endDate', 'End Date', 'end_date')}`,
+        value('description', 'Description', 'description') && `Award description: ${value('description', 'Description', 'description')}`,
+      ].filter(Boolean);
+      const description = detailParts.join(' • ').slice(0, 3000) || 'Public federal award recipient record. Contact details are not supplied by this source.';
       const sourceKey = `usaspending.gov:${record.sourceRecordId}:${user.id}`;
       await prisma.lead.upsert({
         where: { sourceKey },
         create: { id: randomUUID(), ownerId: user.id, source: 'usaspending.gov', sourceRecordId: record.sourceRecordId,
-          sourceKey, companyName: name, awardAmount: record.awardAmount ?? undefined, score,
-          activities: { create: { type: 'imported', description: 'Imported from saved USAspending.gov research.' } } },
-        update: {},
+          sourceKey, companyName: name, awardAmount: record.awardAmount ?? undefined, score, description,
+          activities: { create: { type: 'imported', description: 'Imported and enriched from saved USAspending.gov award details.' } } },
+        update: { sourceRecordId: record.sourceRecordId, awardAmount: record.awardAmount ?? undefined, score, description },
       });
       imported++;
     }
