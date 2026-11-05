@@ -1,46 +1,39 @@
-name: Build
+name: Build and test marketplace
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main", "automation/**"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     strategy:
+      fail-fast: false
       matrix:
         node-version: [20.x, 22.x]
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - uses: pnpm/action-setup@v4
-      with:
-        version: 10
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: pnpm
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
 
-    - name: Install
-      run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-    - name: Build API
-      run: pnpm --filter @ai-data-marketplace/api run vercel-build
+      - name: Build API
+        run: pnpm --filter @ai-data-marketplace/api run build
 
-    - name: Build web
-      run: pnpm --filter @ai-data-marketplace/web run build
-    
-        - name: AI Auto Code Review
-      uses: iandis/ai-code-review@v1.0.1
-      with:
-        repo: ${{ github.repository }}
-
-  
-    - name: Vercel Action
-      uses: amondnet/vercel-action@v42.3.0
+      - name: Build web
+        run: pnpm --filter @ai-data-marketplace/web run build

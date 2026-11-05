@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 
+if (process.env.NODE_ENV === 'production') {
+  console.error('Refusing to create demo users, sample datasets, or fake wallet activity in production.');
+  process.exit(1);
+}
+
 if (process.env.SEED !== 'true') {
-  console.log('Seed script skipped. Set SEED=true to run it explicitly.');
+  console.log('Seed script skipped. Set SEED=true to run local development seed data explicitly.');
   process.exit(0);
 }
 

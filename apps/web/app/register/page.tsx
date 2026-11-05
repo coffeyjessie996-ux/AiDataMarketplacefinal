@@ -1,0 +1,50 @@
+'use client';
+
+import { FormEvent, useState } from 'react';
+const API = process.env.NEXT_PUBLIC_API_URL || '/api';
+
+export default function RegisterPage() {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<'buyer' | 'seller'>('buyer');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(''); setLoading(true);
+    try {
+      const response = await fetch(`${API}/auth/register`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), email: email.trim(), password, role }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.token) {
+        const message = typeof data.error === 'string' ? data.error : data.error?.formErrors?.[0] || 'Account creation failed. Check your details.';
+        throw new Error(message);
+      }
+      localStorage.setItem('auth_token', data.token);
+      window.location.assign('/dashboard');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create your account. Please try again.');
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <main className="auth-page"><section className="auth-card">
+      <a className="auth-brand" href="/">AIDATA <span>MARKETPLACE</span></a>
+      <p className="eyebrow">JOIN THE MARKETPLACE</p><h1>Create your account</h1>
+      <p className="auth-intro">Set up a buyer or seller account to access the marketplace.</p>
+      <form onSubmit={submit}>
+        <div className="form-group"><label htmlFor="name">Full name</label><input id="name" type="text" autoComplete="name" required minLength={2} value={name} onChange={e => setName(e.target.value)} /></div>
+        <div className="form-group"><label htmlFor="email">Email address</label><input id="email" type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} /></div>
+        <div className="form-group"><label htmlFor="password">Password (at least 6 characters)</label><input id="password" type="password" autoComplete="new-password" required minLength={6} value={password} onChange={e => setPassword(e.target.value)} /></div>
+        <div className="form-group"><label htmlFor="role">Account type</label><select id="role" value={role} onChange={e => setRole(e.target.value as 'buyer' | 'seller')}><option value="buyer">Buyer</option><option value="seller">Seller</option></select></div>
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <button className="primary-button auth-submit" type="submit" disabled={loading}>{loading ? 'Creating account…' : 'Create account'}</button>
+      </form>
+      <p className="auth-switch">Already registered? <a href="/login">Sign in</a></p>
+      <a className="auth-home-link" href="/">← Back to marketplace</a>
+    </section></main>
+  );
+}
