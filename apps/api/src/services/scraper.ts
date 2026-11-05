@@ -75,7 +75,7 @@ async function validatePublicHttpUrl(rawUrl: string): Promise<URL> {
   // Reject hostnames that resolve to any non-public address before fetching.
   // Redirects are disabled below so a public URL cannot redirect into a private network.
   if (!isIP(parsed.hostname)) {
-    let addresses: Awaited<ReturnType<typeof lookup>>;
+    let addresses: Array<{ address: string; family: number }>;
     try {
       addresses = await lookup(parsed.hostname, { all: true, verbatim: true });
     } catch {
