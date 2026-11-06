@@ -16,6 +16,12 @@ Start with one narrow product that the existing database can support:
 
 The current records are award-recipient intelligence. They are not proof that a supplier is currently active, available, qualified, or looking for subcontract work. Award amounts are not marketplace revenue.
 
+## Additional public source: SAM.gov opportunities
+
+The scheduled SAM.gov Get Opportunities Public API job stores recent public solicitation, combined synopsis/solicitation, and sources-sought notices as a separate research source. It refreshes a bounded recent date window and deduplicates by notice ID. The SAM.gov API key is read only from the server-side `SAM_API_KEY` environment variable.
+
+These records are opportunity intelligence, not supplier verification or buyer leads. Government contracting-officer points of contact must not be treated as marketing prospects. A SAM.gov API key has account-specific daily request limits, so keep the scheduled job to one request per day unless the account's documented quota is confirmed.
+
 ## Buyer hypotheses to validate
 
 Prioritize interviews and small paid pilots with:
