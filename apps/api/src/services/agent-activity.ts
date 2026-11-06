@@ -11,12 +11,13 @@ export async function startAgentTask(
   prisma: PrismaClient,
   agentName: string,
   taskName: string,
+  agentType: 'automation' | 'ai_agent' = 'automation',
 ): Promise<string | null> {
   try {
     const task = await prisma.agentTaskRun.create({
       data: {
         agentName,
-        agentType: 'automation',
+        agentType,
         taskName,
         status: 'RUNNING',
         message: 'Task started.',
