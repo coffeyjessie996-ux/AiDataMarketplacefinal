@@ -109,6 +109,7 @@ export default function DataBankPage() {
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <a href="/suppliers" style={{ color: '#93c5fd', textDecoration: 'none' }}>Supplier research</a>
             <a href="/pipeline" style={{ color: '#93c5fd', textDecoration: 'none' }}>Sales pipeline</a>
+            <a href="/agents" style={{ color: '#93c5fd', textDecoration: 'none' }}>Agent activity</a>
           </div>
         </nav>
 
