@@ -36,7 +36,11 @@ app.use((req, _res, next) => {
 });
 
 function hasValidDatabaseUrl() {
-  const url = process.env.DATABASE_URL || '';
+  const url =
+    process.env.SUPABASE_POOLER_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.DATABASE_URL ||
+    '';
   return url.startsWith('postgresql://') || url.startsWith('postgres://');
 }
 
@@ -317,7 +321,18 @@ app.post('/auth/login', async (req, res) => {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const user = await prisma.user.findUnique({ where: { email: parsed.data.email.toLowerCase() } });
+  let user: Awaited<ReturnType<typeof prisma.user.findUnique>>;
+  try {
+    user = await prisma.user.findUnique({
+      where: { email: parsed.data.email.toLowerCase() },
+    });
+  } catch (error) {
+    console.error('login database lookup failed', error);
+    return res.status(503).json({
+      error: 'Sign-in is temporarily unavailable because the database connection is not responding. Please try again shortly.',
+    });
+  }
+
   if (!user || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
     return res.status(401).json({ error: 'Invalid credentials.' });
   }

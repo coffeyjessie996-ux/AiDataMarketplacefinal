@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
+const SIGN_IN_TIMEOUT_MS = 15_000;
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -10,19 +11,43 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setError(''); setLoading(true);
+    event.preventDefault();
+    setError('');
+    setLoading(true);
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), SIGN_IN_TIMEOUT_MS);
+
     try {
       const response = await fetch(`${API}/auth/login`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password }),
+        signal: controller.signal,
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.token) throw new Error(typeof data.error === 'string' ? data.error : 'Sign in failed. Check your email and password.');
+      if (!response.ok || !data.token) {
+        throw new Error(
+          typeof data.error === 'string'
+            ? data.error
+            : 'Sign in failed. Check your email and password.',
+        );
+      }
+
       localStorage.setItem('auth_token', data.token);
       window.location.assign('/dashboard');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to sign in. Please try again.');
-    } finally { setLoading(false); }
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError(
+          'The sign-in service is taking too long to reach the database. Please try again shortly.',
+        );
+      } else {
+        setError(err instanceof Error ? err.message : 'Unable to sign in. Please try again.');
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+      setLoading(false);
+    }
   }
 
   return (
