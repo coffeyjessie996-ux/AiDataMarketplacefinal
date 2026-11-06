@@ -103,14 +103,14 @@ export function createCronRouter(prisma: PrismaClient) {
             supplierName: typeof supplierName === 'string' ? supplierName : null,
             awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
             sourceUrl: record.sourceUrl,
-            payload: record,
+            payload: JSON.parse(JSON.stringify(record)),
             retrievedAt,
           },
           update: {
             supplierName: typeof supplierName === 'string' ? supplierName : null,
             awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
             sourceUrl: record.sourceUrl,
-            payload: record,
+            payload: JSON.parse(JSON.stringify(record)),
             retrievedAt,
           },
         });
