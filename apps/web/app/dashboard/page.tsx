@@ -140,6 +140,7 @@ export default function DashboardPage() {
           <div className="nav-group-label">Marketplace</div>
           <a className="nav-item" href="/">🛍️ Browse marketplace</a>
           <a className="nav-item" href="/suppliers">🔎 Supplier research</a>
+          <a className="nav-item" href="/data-bank">🗄️ AI Data Bank</a>
           <a className="nav-item" href="/pipeline">📈 Lead &amp; sales pipeline</a>
         </div>
 
