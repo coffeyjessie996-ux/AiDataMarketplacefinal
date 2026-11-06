@@ -15,11 +15,21 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": { "service": "api" }
+      "destination": {
+        "service": "api"
+      }
     },
     {
       "source": "/(.*)",
-      "destination": { "service": "web" }
+      "destination": {
+        "service": "web"
+      }
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/research/federal-awards",
+      "schedule": "0 10 * * *"
     }
   ]
 }
