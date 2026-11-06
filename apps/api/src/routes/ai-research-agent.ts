@@ -73,7 +73,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
           await prisma.supplierResearchRecord.update({
             where: { id: record.id },
             data: {
-              payload: {
+              payload: JSON.parse(JSON.stringify({
                 ...existingPayload,
                 aiResearchAnalysis: {
                   ...analysis,
@@ -81,7 +81,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
                   model: process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini',
                   generatedAt: new Date().toISOString(),
                 },
-              },
+              })),
             },
           });
           saved += 1;
