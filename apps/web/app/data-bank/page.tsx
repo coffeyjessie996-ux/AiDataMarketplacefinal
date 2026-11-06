@@ -184,6 +184,12 @@ export default function DataBankPage() {
                     <strong>{displayName}</strong>
                     <div style={{ color: '#93a4bd', fontSize: 12, marginTop: 5 }}>{title}</div>
                     <div style={{ color: '#8291a7', fontSize: 11, marginTop: 5 }}>ID: {record.sourceRecordId}</div>
+                    {record.payload.aiResearchAnalysis && typeof record.payload.aiResearchAnalysis === 'object' && <div style={{ marginTop: 9, padding: 9, borderRadius: 7, background: '#172033', border: '1px solid #334155' }}>
+                      <div style={{ color: '#86efac', fontSize: 10, fontWeight: 700, letterSpacing: 1 }}>AI RESEARCH TRIAGE · NOT VERIFIED</div>
+                      <div style={{ color: '#cbd5e1', fontSize: 12, marginTop: 5 }}>{textValue((record.payload.aiResearchAnalysis as Record<string, unknown>).summary)}</div>
+                      <div style={{ color: '#93a4bd', fontSize: 11, marginTop: 5 }}>Fit / completeness score: {textValue((record.payload.aiResearchAnalysis as Record<string, unknown>).fitScore, '—')}/100</div>
+                      <div style={{ color: '#93a4bd', fontSize: 11, marginTop: 4 }}>Next step: {textValue((record.payload.aiResearchAnalysis as Record<string, unknown>).nextStep)}</div>
+                    </div>}
                   </td>
                   <td style={{ padding: 12, borderBottom: '1px solid #26364d', whiteSpace: 'nowrap' }}>{sourceLabel(record.source)}</td>
                   <td style={{ padding: 12, borderBottom: '1px solid #26364d', whiteSpace: 'nowrap' }}>{amount}</td>
