@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { finishAgentTask, startAgentTask } from '../services/agent-activity';
 
 const SOURCE_URL = 'https://api.usaspending.gov/api/v2/search/spending_by_award/';
 
@@ -53,6 +54,7 @@ export function createCronRouter(prisma: PrismaClient) {
     const startDate = start.toISOString().slice(0, 10);
     const endDate = end.toISOString().slice(0, 10);
     const retrievedAt = new Date();
+    const taskId = await startAgentTask(prisma, 'USAspending collector', 'Collect recent federal award records');
 
     try {
       const response = await fetch(SOURCE_URL, {
@@ -76,6 +78,7 @@ export function createCronRouter(prisma: PrismaClient) {
       });
 
       if (!response.ok) {
+        await finishAgentTask(prisma, taskId, 'FAILED', { message: `USAspending.gov returned HTTP ${response.status}.` });
         return res.status(502).json({
           error: 'USAspending.gov returned an error.',
           sourceStatus: response.status,
@@ -139,6 +142,10 @@ export function createCronRouter(prisma: PrismaClient) {
         saved += 1;
       }
 
+      await finishAgentTask(prisma, taskId, 'COMPLETED', {
+        message: `USAspending collection completed: ${saved} records saved, ${skipped} skipped.`,
+        recordsFetched: rows.length, recordsSaved: saved, recordsFailed: skipped,
+      });
       return res.json({
         ok: true,
         source: 'USAspending.gov',
@@ -150,6 +157,7 @@ export function createCronRouter(prisma: PrismaClient) {
         note: 'Daily refresh of up to 100 high-value public award records from the last 90 days. These are supplier-research records, not verified contacts, sales, or marketplace revenue.',
       });
     } catch (error) {
+      await finishAgentTask(prisma, taskId, 'FAILED', { message: 'USAspending collection failed before completion.' });
       console.error('Scheduled USAspending refresh failed', error);
       return res.status(502).json({ error: 'Scheduled supplier research refresh failed.' });
     }
@@ -167,6 +175,7 @@ export function createCronRouter(prisma: PrismaClient) {
       return res.status(429).json({ error: 'Too many SAM.gov research requests. Try again later.' });
     }
     if (!apiKey) return res.status(503).json({ error: 'SAM.gov research is not configured: SAM_API_KEY is missing.' });
+    const taskId = await startAgentTask(prisma, 'SAM.gov collector', 'Collect public federal opportunity notices');
 
     const end = new Date();
     const start = new Date(end);
@@ -193,6 +202,7 @@ export function createCronRouter(prisma: PrismaClient) {
         signal: AbortSignal.timeout(20000),
       });
       if (!response.ok) {
+        await finishAgentTask(prisma, taskId, 'FAILED', { message: `SAM.gov returned HTTP ${response.status}.` });
         return res.status(502).json({ error: 'SAM.gov returned an error.', sourceStatus: response.status });
       }
 
@@ -272,6 +282,10 @@ export function createCronRouter(prisma: PrismaClient) {
         skipped += outcomes.length - outcomes.filter(Boolean).length;
       }
 
+      await finishAgentTask(prisma, taskId, 'COMPLETED', {
+        message: `SAM.gov collection completed: ${saved} opportunity records saved, ${skipped} skipped.`,
+        recordsFetched: rows.length, recordsSaved: saved, recordsFailed: skipped,
+      });
       return res.json({
         ok: true,
         source: 'SAM.gov Get Opportunities Public API',
@@ -284,6 +298,7 @@ export function createCronRouter(prisma: PrismaClient) {
         note: 'Public solicitation research only. Government points of contact are not sales leads; these records are not supplier verification or marketplace revenue.',
       });
     } catch (error) {
+      await finishAgentTask(prisma, taskId, 'FAILED', { message: 'SAM.gov collection failed before completion.' });
       console.error('Scheduled SAM.gov opportunity refresh failed', error);
       return res.status(502).json({ error: 'Scheduled SAM.gov opportunity refresh failed.' });
     }

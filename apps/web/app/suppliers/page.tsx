@@ -99,6 +99,7 @@ export default function SupplierResearchPage() {
         <nav style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 28 }}>
           <a href="/" style={{ color: '#93c5fd', textDecoration: 'none' }}>← Back to marketplace</a>
           <a href="/dashboard" style={{ color: '#93c5fd', textDecoration: 'none' }}>Dashboard</a>
+          <a href="/data-bank" style={{ color: '#93c5fd', textDecoration: 'none' }}>AI Data Bank</a>
         </nav>
         <header style={{ marginBottom: 24 }}>
           <p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 12, fontWeight: 700 }}>SUPPLIER INTELLIGENCE</p>

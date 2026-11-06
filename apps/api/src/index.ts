@@ -13,6 +13,9 @@ import { prisma } from './lib/prisma';
 import { User } from './types';
 import { createPipelineRouter } from './routes/pipeline';
 import { createCronRouter } from './routes/cron';
+import { createDataBankRouter } from './routes/data-bank';
+import { createAgentsRouter } from './routes/agents';
+import { finishAgentTask, startAgentTask } from './services/agent-activity';
 
 dotenv.config();
 
@@ -191,6 +194,8 @@ function requireRole(roles: string[]) {
 
 app.use('/pipeline', createPipelineRouter(prisma, requireAuth));
 app.use('/cron', createCronRouter(prisma));
+app.use('/data-bank', createDataBankRouter(prisma, requireAuth));
+app.use('/agents', createAgentsRouter(prisma, requireAuth));
 
 const registerSchema = z.object({
   name: z.string().min(2),
@@ -406,6 +411,7 @@ app.post('/scrapers/start', requireAuth, async (req, res) => {
     });
   }
 
+  const taskId = await startAgentTask(prisma, 'Public web scraper', 'Fetch and store submitted public web pages');
   try {
     const results = await scrapeSources(parsed.data.urls);
     const successfulResults = results.filter(
@@ -450,6 +456,10 @@ app.post('/scrapers/start', requireAuth, async (req, res) => {
       });
     }));
 
+    await finishAgentTask(prisma, taskId, 'COMPLETED', {
+      message: `Public web scrape completed: ${saved.length} pages saved, ${results.length - successfulResults.length} failed.`,
+      recordsFetched: results.length, recordsSaved: saved.length, recordsFailed: results.length - successfulResults.length,
+    });
     return res.status(200).json({
       success: true,
       requested: parsed.data.urls.length,
@@ -460,6 +470,7 @@ app.post('/scrapers/start', requireAuth, async (req, res) => {
       note: 'Successful public-page snapshots are saved for review. They are not verified supplier contacts or published products.',
     });
   } catch (error) {
+    await finishAgentTask(prisma, taskId, 'FAILED', { message: 'Public web scraper failed before completion.' });
     console.error('Scraper ingestion failed', error);
     return res.status(500).json({
       error: 'Scraper ingestion failed. No dataset was published.',

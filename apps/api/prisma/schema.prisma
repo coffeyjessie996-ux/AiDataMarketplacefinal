@@ -112,6 +112,24 @@ model SupplierResearchRecord {
   @@index([retrievedAt])
 }
 
+model AgentTaskRun {
+  id             String   @id @default(cuid())
+  agentName      String
+  agentType      String   @default("automation")
+  taskName       String
+  status         String   @default("RUNNING")
+  message        String
+  recordsFetched Int      @default(0)
+  recordsSaved   Int      @default(0)
+  recordsFailed  Int      @default(0)
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([startedAt])
+  @@index([status, startedAt])
+}
+
 model Payout {
   id                 String @id @default(cuid())
   userId             String
