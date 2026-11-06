@@ -15,9 +15,10 @@ type RevenueSummary = {
 
 type Lead = {
   id: string; companyName: string; source: string; sourceRecordId?: string | null;
-  email?: string | null; website?: string | null; description?: string | null;
+  contactName?: string | null; email?: string | null; website?: string | null; description?: string | null;
   awardAmount?: string | number | null; score: number; stage: string;
   notes?: string | null; nextFollowUpAt?: string | null; updatedAt: string;
+  priorityReasons?: string[]; priorityBlockers?: string[];
 };
 
 export default function PipelinePage() {
@@ -164,14 +165,14 @@ export default function PipelinePage() {
             <tbody>{leads.map(lead => <tr key={lead.id}>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 260 }}><strong>{lead.companyName}</strong><div style={{ fontSize: 12, color: '#93a4bd', marginTop: 4 }}>{lead.description || 'No additional award details supplied.'}</div><div style={{ fontSize: 11, color: '#8291a7', marginTop: 4 }}>Source: {lead.source} · Record: {lead.sourceRecordId || 'not supplied'}</div></td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', whiteSpace: 'nowrap' }}>{money(lead.awardAmount)}</td>
-              <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}>{lead.email ? <a href={`mailto:${lead.email}`} style={{ color: '#93c5fd' }}>{lead.email}</a> : lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: '#93c5fd' }}>Company website</a> : <span style={{ color: '#fbbf24' }}>Not provided by source</span>}</td>
-              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>{lead.score}/100</td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}>{lead.email ? <a href={`mailto:${lead.email}`} style={{ color: '#93c5fd' }}>{lead.email}</a> : lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: '#93c5fd' }}>Company website</a> : lead.contactName ? <span>{lead.contactName}</span> : <span style={{ color: '#fbbf24' }}>Not provided by source</span>}</td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}><strong>{lead.score}/100</strong><div style={{ color: '#93a4bd', fontSize: 11, marginTop: 4 }}>{(lead.priorityReasons || []).slice(0, 3).join(' · ')}</div>{lead.priorityBlockers?.length ? <div style={{ color: '#fbbf24', fontSize: 11, marginTop: 4 }}>{lead.priorityBlockers.slice(0, 2).join(' · ')}</div> : null}</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><select value={lead.stage} onChange={e => void changeStage(lead,e.target.value)} style={{ padding: 8, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }}>{stages.map(s => <option key={s} value={s}>{s}</option>)}</select></td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><input aria-label={`Follow-up date for ${lead.companyName}`} type="date" value={lead.nextFollowUpAt ? lead.nextFollowUpAt.slice(0,10) : ''} onChange={e => void changeFollowUp(lead,e.target.value)} style={{ padding: 7, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }} /></td>
             </tr>)}</tbody>
           </table></div>}
       </section>
-      <p style={{ color: '#8291a7', fontSize: 12, marginTop: 14 }}>Award-size score is only a sorting hint. It does not verify a supplier, prove purchase intent, create a product listing, or count revenue. Payment and checkout remain separately disabled until verified Stripe processing is implemented.</p>
+      <p style={{ color: '#8291a7', fontSize: 12, marginTop: 14 }}>Priority score measures public-record completeness and contactability, not purchase intent or conversion likelihood. Records without an email, website, or named contact are capped at 59 until a direct contact path is found. Supplier awards are not marketplace revenue. Payment and checkout remain disabled until verified Stripe processing is implemented.</p>
     </div>
   </main>;
 }

@@ -6,6 +6,46 @@ import type { User } from '../types';
 type AuthReq = express.Request & { user?: User };
 const stages = ['NEW', 'QUALIFIED', 'CONTACTED', 'PROPOSAL', 'WON', 'LOST'] as const;
 
+function calculateLeadPriority(input: {
+  companyName?: string | null;
+  source?: string | null;
+  awardAmount?: unknown;
+  description?: string | null;
+  contactName?: string | null;
+  email?: string | null;
+  website?: string | null;
+}) {
+  const description = input.description || '';
+  const checks = [
+    { label: 'Company identified', points: 10, complete: Boolean(input.companyName?.trim()) },
+    { label: 'Award amount available', points: 5, complete: input.awardAmount !== null && input.awardAmount !== undefined && Number.isFinite(Number(input.awardAmount)) },
+    { label: 'Awarding agency available', points: 5, complete: /Agency:\s*[^•]+/i.test(description) },
+    { label: 'NAICS classification available', points: 5, complete: /NAICS:\s*[^•]+/i.test(description) },
+    { label: 'UEI available', points: 10, complete: /UEI:\s*[^•]+/i.test(description) },
+    { label: 'Award description available', points: 5, complete: /Award description:\s*[^•]+/i.test(description) },
+    { label: 'Performance location available', points: 5, complete: /Performance state:\s*[^•]+/i.test(description) },
+    { label: 'Start date available', points: 5, complete: /Start date:\s*[^•]+/i.test(description) },
+    { label: 'End date available', points: 5, complete: /End date:\s*[^•]+/i.test(description) },
+    { label: 'Email contact available', points: 20, complete: Boolean(input.email?.trim()) },
+    { label: 'Company website available', points: 10, complete: Boolean(input.website?.trim()) },
+    { label: 'Named contact available', points: 10, complete: Boolean(input.contactName?.trim()) },
+    { label: 'Source identified', points: 5, complete: Boolean(input.source?.trim()) },
+  ];
+  let score = checks.reduce((total, check) => total + (check.complete ? check.points : 0), 0);
+  const hasDirectContact = Boolean(input.email?.trim() || input.website?.trim() || input.contactName?.trim());
+  if (!hasDirectContact) score = Math.min(score, 59);
+  return {
+    score: Math.min(100, score),
+    priorityReasons: checks.filter((check) => check.complete).map((check) => check.label),
+    priorityBlockers: [
+      ...(!input.email?.trim() ? ['No email address on record'] : []),
+      ...(!input.website?.trim() ? ['No company website on record'] : []),
+      ...(!input.contactName?.trim() ? ['No named contact on record'] : []),
+      ...(!hasDirectContact ? ['Score capped until a direct contact path is found'] : []),
+    ],
+  };
+}
+
 export function createPipelineRouter(prisma: PrismaClient, auth: express.RequestHandler) {
   const router = express.Router();
   router.use(auth);
@@ -22,7 +62,8 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       include: { activities: { orderBy: { createdAt: 'desc' }, take: 5 } },
       orderBy: { updatedAt: 'desc' }, take: 200,
     });
-    return res.json({ count: leads.length, leads });
+    const enrichedLeads = leads.map((lead) => ({ ...lead, ...calculateLeadPriority(lead) }));
+    return res.json({ count: enrichedLeads.length, leads: enrichedLeads });
   });
 
   router.post('/leads', async (req, res) => {
@@ -50,8 +91,6 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
     for (const record of records) {
       const name = record.supplierName?.trim();
       if (!name) continue;
-      const amount = Number(record.awardAmount ?? 0);
-      const score = amount >= 1000000 ? 85 : amount >= 250000 ? 75 : amount >= 50000 ? 65 : amount >= 10000 ? 55 : 40;
       const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
         ? record.payload as Record<string, unknown> : {};
       const value = (...keys: string[]) => {
@@ -61,6 +100,21 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
         }
         return '';
       };
+      const priority = calculateLeadPriority({
+        companyName: name,
+        source: record.source,
+        awardAmount: record.awardAmount,
+        description: [
+          value('awardingAgency', 'Awarding Agency', 'awarding_agency_name') && `Agency: ${value('awardingAgency', 'Awarding Agency', 'awarding_agency_name')}`,
+          value('naics', 'NAICS', 'naics') && `NAICS: ${value('naics', 'NAICS', 'naics')}`,
+          value('supplierUei', 'Recipient UEI', 'recipient_uei') && `UEI: ${value('supplierUei', 'Recipient UEI', 'recipient_uei')}`,
+          value('description', 'Description', 'description') && `Award description: ${value('description', 'Description', 'description')}`,
+          value('performanceState', 'Place of Performance State Code', 'place_of_performance_state_code') && `Performance state: ${value('performanceState', 'Place of Performance State Code', 'place_of_performance_state_code')}`,
+          value('startDate', 'Start Date', 'start_date') && `Start date: ${value('startDate', 'Start Date', 'start_date')}`,
+          value('endDate', 'End Date', 'end_date') && `End date: ${value('endDate', 'End Date', 'end_date')}`,
+        ].filter(Boolean).join(' • '),
+      });
+      const score = priority.score;
       const detailParts = [
         value('awardingAgency', 'Awarding Agency', 'awarding_agency_name') && `Agency: ${value('awardingAgency', 'Awarding Agency', 'awarding_agency_name')}`,
         value('performanceState', 'Place of Performance State Code', 'place_of_performance_state_code') && `Performance state: ${value('performanceState', 'Place of Performance State Code', 'place_of_performance_state_code')}`,
@@ -82,7 +136,7 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       imported++;
     }
     return res.json({ source: 'USAspending.gov', recordsReviewed: records.length, leadsCreatedOrExisting: imported,
-      note: 'Score is an award-size prioritization hint only, not supplier verification or predicted conversion.' });
+      note: 'Priority score reflects public-record completeness and contactability, not supplier verification or predicted conversion. Records without an email, website, or named contact are capped at 59.' });
   });
 
   router.patch('/leads/:id', async (req, res) => {
