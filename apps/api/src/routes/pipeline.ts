@@ -17,6 +17,9 @@ function calculateLeadPriority(input: {
   updatedAt?: Date | string | null;
 }) {
   const description = input.description || '';
+  const updatedAtMs = input.updatedAt instanceof Date
+    ? input.updatedAt.getTime()
+    : input.updatedAt ? new Date(input.updatedAt).getTime() : Number.NaN;
   const checks = [
     { label: 'Company identified', points: 5, complete: Boolean(input.companyName?.trim()) },
     { label: 'Award amount available', points: 5, complete: input.awardAmount !== null && input.awardAmount !== undefined && Number.isFinite(Number(input.awardAmount)) },
@@ -27,7 +30,7 @@ function calculateLeadPriority(input: {
     { label: 'Performance location available', points: 5, complete: /Performance state:\s*[^•]+/i.test(description) },
     { label: 'Start date available', points: 5, complete: /Start date:\s*[^•]+/i.test(description) },
     { label: 'End date available', points: 5, complete: /End date:\s*[^•]+/i.test(description) },
-    { label: 'Research record refreshed within 90 days', points: 5, complete: Boolean(input.updatedAt && Number.isFinite(new Date(input.updatedAt).getTime()) && Date.now() - new Date(input.updatedAt).getTime() >= 0 && Date.now() - new Date(input.updatedAt).getTime() <= 90 * 24 * 60 * 60 * 1000) },
+    { label: 'Research record refreshed within 90 days', points: 5, complete: Number.isFinite(updatedAtMs) && Date.now() - updatedAtMs >= 0 && Date.now() - updatedAtMs <= 90 * 24 * 60 * 60 * 1000 },
     { label: 'Email contact available', points: 20, complete: Boolean(input.email?.trim()) },
     { label: 'Company website available', points: 10, complete: Boolean(input.website?.trim()) },
     { label: 'Named contact available', points: 10, complete: Boolean(input.contactName?.trim()) },
