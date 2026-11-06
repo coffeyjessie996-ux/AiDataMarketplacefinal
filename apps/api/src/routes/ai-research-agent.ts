@@ -41,7 +41,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
     try {
       const candidates = await prisma.supplierResearchRecord.findMany({
         orderBy: [{ retrievedAt: 'desc' }],
-        take: 30,
+        take: 500,
         select: {
           id: true,
           source: true,
