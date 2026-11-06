@@ -11,6 +11,28 @@ function authorized(requestHeader: string | undefined, secret: string): boolean 
   return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }
 
+// Best-effort per-instance throttle for the serverless cron endpoint.
+// The bearer secret remains the primary access control; this limits repeated requests
+// handled by the same warm instance without relying on client-supplied identity headers.
+const samOpportunityRequestWindows = new Map<string, { startedAt: number; count: number }>();
+
+function allowSamOpportunityRequest(key: string, now = Date.now()): boolean {
+  const windowMs = 15 * 60 * 1000;
+  const maxRequests = 3;
+  for (const [entryKey, window] of samOpportunityRequestWindows) {
+    if (now - window.startedAt >= windowMs) samOpportunityRequestWindows.delete(entryKey);
+  }
+  const current = samOpportunityRequestWindows.get(key);
+  if (!current || now - current.startedAt >= windowMs) {
+    if (samOpportunityRequestWindows.size >= 500) samOpportunityRequestWindows.clear();
+    samOpportunityRequestWindows.set(key, { startedAt: now, count: 1 });
+    return true;
+  }
+  if (current.count >= maxRequests) return false;
+  current.count += 1;
+  return true;
+}
+
 export function createCronRouter(prisma: PrismaClient) {
   const router = Router();
 
@@ -140,6 +162,10 @@ export function createCronRouter(prisma: PrismaClient) {
     const apiKey = process.env.SAM_API_KEY;
     if (!secret) return res.status(503).json({ error: 'Scheduled research is not configured: CRON_SECRET is missing.' });
     if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized scheduled research request.' });
+    if (!allowSamOpportunityRequest(req.ip || 'unknown')) {
+      res.setHeader('Retry-After', '900');
+      return res.status(429).json({ error: 'Too many SAM.gov research requests. Try again later.' });
+    }
     if (!apiKey) return res.status(503).json({ error: 'SAM.gov research is not configured: SAM_API_KEY is missing.' });
 
     const end = new Date();
@@ -190,6 +216,14 @@ export function createCronRouter(prisma: PrismaClient) {
           if (!noticeId) return false;
           const award = getObject(row.award);
           const awardee = getObject(award.awardee);
+          const rawAwardAmount = typeof award.amount === 'number'
+            ? award.amount
+            : typeof award.amount === 'string' && award.amount.trim() !== ''
+              ? Number(award.amount)
+              : Number.NaN;
+          const normalizedAwardAmount = Number.isFinite(rawAwardAmount) && rawAwardAmount >= 0
+            ? rawAwardAmount
+            : null;
           const opportunityUrl = asText(row.uiLink);
           const sourceUrl = opportunityUrl && /^https:\/\//i.test(opportunityUrl)
             ? opportunityUrl
@@ -219,14 +253,14 @@ export function createCronRouter(prisma: PrismaClient) {
               source: 'sam.gov_opportunities',
               sourceRecordId: noticeId,
               supplierName: asText(awardee.name),
-              awardAmount: Number.isFinite(Number(award.amount)) && Number(award.amount) >= 0 ? Number(award.amount) : null,
+              awardAmount: normalizedAwardAmount,
               sourceUrl,
               payload,
               retrievedAt,
             },
             update: {
               supplierName: asText(awardee.name),
-              awardAmount: Number.isFinite(Number(award.amount)) && Number(award.amount) >= 0 ? Number(award.amount) : null,
+              awardAmount: normalizedAwardAmount,
               sourceUrl,
               payload,
               retrievedAt,
