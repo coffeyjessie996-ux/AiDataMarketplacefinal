@@ -93,7 +93,6 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
     for (const record of records) {
       const name = record.supplierName?.trim();
       if (!name) continue;
-      const amount = Number(record.awardAmount ?? 0);
       const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
         ? record.payload as Record<string, unknown> : {};
       const value = (...keys: string[]) => {
@@ -140,7 +139,7 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       imported++;
     }
     return res.json({ source: 'USAspending.gov', recordsReviewed: records.length, leadsCreatedOrExisting: imported,
-      note: 'Score is an award-size prioritization hint only, not supplier verification or predicted conversion.' });
+      note: 'Priority score reflects public-record completeness and contactability, not supplier verification or predicted conversion. Records without an email, website, or named contact are capped at 59.' });
   });
 
   router.patch('/leads/:id', async (req, res) => {
