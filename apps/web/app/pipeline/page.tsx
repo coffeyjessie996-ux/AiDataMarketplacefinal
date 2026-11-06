@@ -5,6 +5,14 @@ import { useCallback, useEffect, useState } from 'react';
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 const stages = ['NEW', 'QUALIFIED', 'CONTACTED', 'PROPOSAL', 'WON', 'LOST'];
 
+type RevenueSummary = {
+  actualPaidOrderValueCents: number; actualPaidOrders: number;
+  orderCounts: { pending: number; paid: number; failed: number; refunded: number };
+  leadStages: Record<string, number>; totalLeads: number; openLeads: number;
+  proposals: number; closedWonLeads: number; followUpsDue: number;
+  revenueDefinition: string; pipelineDefinition: string; updatedAt: string;
+};
+
 type Lead = {
   id: string; companyName: string; source: string; sourceRecordId?: string | null;
   email?: string | null; website?: string | null; description?: string | null;
@@ -15,6 +23,7 @@ type Lead = {
 export default function PipelinePage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [revenue, setRevenue] = useState<RevenueSummary | null>(null);
   const [query, setQuery] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,16 +40,20 @@ export default function PipelinePage() {
     setError('');
     try {
       const h = headers();
-      const [leadRes, salesRes] = await Promise.all([
+      const [leadRes, salesRes, revenueRes] = await Promise.all([
         fetch(`${API}/pipeline/leads?q=${encodeURIComponent(query)}`, { headers: h }),
         fetch(`${API}/pipeline/sales`, { headers: h }),
+        fetch(`${API}/pipeline/revenue`, { headers: h }),
       ]);
       const leadData = await leadRes.json();
       const salesData = await salesRes.json();
+      const revenueData = await revenueRes.json();
       if (!leadRes.ok) throw new Error(leadData.error || 'Could not load leads.');
       if (!salesRes.ok) throw new Error(salesData.error || 'Could not load sales pipeline.');
+      if (!revenueRes.ok) throw new Error(revenueData.error || 'Could not load revenue figures.');
       setLeads(leadData.leads || []);
       setCounts(salesData.stages || {});
+      setRevenue(revenueData);
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to load pipeline.'); }
   }, [query]);
 
@@ -108,6 +121,25 @@ export default function PipelinePage() {
       <p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 12, fontWeight: 700 }}>GROWTH OPERATIONS</p>
       <h1 style={{ fontSize: 36, margin: '8px 0' }}>Lead &amp; Sales Pipeline</h1>
       <p style={{ color: '#a8b6ca' }}>Track sourced suppliers from first discovery through qualification, outreach, proposal, and closed outcome.</p>
+      <section aria-label="Revenue node" style={{ background: '#101a2b', border: '1px solid #2563eb', borderRadius: 12, padding: 18, margin: '22px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <div><p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 11, fontWeight: 700, margin: 0 }}>REVENUE NODE · LIVE DATABASE</p><h2 style={{ fontSize: 24, margin: '6px 0' }}>Revenue &amp; conversion overview</h2></div>
+          <span style={{ color: '#93a4bd', fontSize: 12 }}>Updated {revenue?.updatedAt ? new Date(revenue.updatedAt).toLocaleString() : '—'}</span>
+        </div>
+        {revenue ? <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10, marginTop: 14 }}>
+            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Actual paid order value</div><strong style={{ fontSize: 25 }}>{new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(revenue.actualPaidOrderValueCents / 100)}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>{revenue.actualPaidOrders} paid orders</div></div>
+            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Open opportunities</div><strong style={{ fontSize: 25 }}>{revenue.openLeads}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Leads not yet won or lost</div></div>
+            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Proposals</div><strong style={{ fontSize: 25 }}>{revenue.proposals}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Leads at proposal stage</div></div>
+            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Closed-won leads</div><strong style={{ fontSize: 25 }}>{revenue.closedWonLeads}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Not counted as paid until an order is PAID</div></div>
+            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Follow-ups due</div><strong style={{ fontSize: 25 }}>{revenue.followUpsDue}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Open leads needing attention</div></div>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 14, color: '#b8c6d9', fontSize: 12 }}>
+            <span>Pending orders: {revenue.orderCounts.pending}</span><span>Paid: {revenue.orderCounts.paid}</span><span>Failed: {revenue.orderCounts.failed}</span><span>Refunded: {revenue.orderCounts.refunded}</span>
+          </div>
+          <p style={{ color: '#93a4bd', fontSize: 11, lineHeight: 1.5, marginBottom: 0 }}>{revenue.revenueDefinition} {revenue.pipelineDefinition}</p>
+        </> : <p style={{ color: '#93a4bd' }}>Loading live revenue and pipeline figures…</p>}
+      </section>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 10, margin: '22px 0' }}>
         {stages.map(stage => <div key={stage} style={{ background: '#111c2e', border: '1px solid #26364d', borderRadius: 10, padding: 14 }}>
           <div style={{ color: '#93a4bd', fontSize: 11 }}>{stage}</div><strong style={{ fontSize: 24 }}>{counts[stage] ?? 0}</strong>
