@@ -12,6 +12,7 @@ import { scrapeSources } from './services/scraper';
 import { prisma } from './lib/prisma';
 import { User } from './types';
 import { createPipelineRouter } from './routes/pipeline';
+import { createCronRouter } from './routes/cron';
 
 dotenv.config();
 
@@ -189,6 +190,7 @@ function requireRole(roles: string[]) {
 }
 
 app.use('/pipeline', createPipelineRouter(prisma, requireAuth));
+app.use('/cron', createCronRouter(prisma));
 
 const registerSchema = z.object({
   name: z.string().min(2),
