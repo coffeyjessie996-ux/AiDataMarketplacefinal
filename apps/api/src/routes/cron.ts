@@ -133,5 +133,127 @@ export function createCronRouter(prisma: PrismaClient) {
     }
   });
 
+  // Daily SAM.gov opportunity refresh. This captures public solicitation research
+  // separately from supplier award records; agency POC details are not marketing leads.
+  router.get('/research/sam-opportunities', async (req, res) => {
+    const secret = process.env.CRON_SECRET;
+    const apiKey = process.env.SAM_API_KEY;
+    if (!secret) return res.status(503).json({ error: 'Scheduled research is not configured: CRON_SECRET is missing.' });
+    if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized scheduled research request.' });
+    if (!apiKey) return res.status(503).json({ error: 'SAM.gov research is not configured: SAM_API_KEY is missing.' });
+
+    const end = new Date();
+    const start = new Date(end);
+    start.setUTCDate(start.getUTCDate() - 30);
+    const samDate = (date: Date) => {
+      const [year, month, day] = date.toISOString().slice(0, 10).split('-');
+      return `${month}/${day}/${year}`;
+    };
+    const retrievedAt = new Date();
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      postedFrom: samDate(start),
+      postedTo: samDate(end),
+      limit: '100',
+      offset: '0',
+    });
+    params.append('ptype', 'o');
+    params.append('ptype', 'k');
+    params.append('ptype', 'r');
+
+    try {
+      const response = await fetch(`https://api.sam.gov/opportunities/v2/search?${params.toString()}`, {
+        headers: { accept: 'application/json', 'user-agent': 'AI-Data-Marketplace/1.0 (public federal opportunity research)' },
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!response.ok) {
+        return res.status(502).json({ error: 'SAM.gov returned an error.', sourceStatus: response.status });
+      }
+
+      const result = await response.json() as {
+        totalRecords?: number;
+        opportunitiesData?: Array<Record<string, unknown>>;
+      };
+      const rows = Array.isArray(result.opportunitiesData) ? result.opportunitiesData : [];
+      let saved = 0;
+      let skipped = 0;
+
+      const getObject = (value: unknown): Record<string, unknown> =>
+        value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      const asText = (value: unknown): string | null =>
+        typeof value === 'string' && value.trim() ? value.trim() : null;
+
+      for (let index = 0; index < rows.length; index += 20) {
+        const batch = rows.slice(index, index + 20);
+        const outcomes = await Promise.all(batch.map(async (row) => {
+          const noticeId = asText(row.noticeId);
+          if (!noticeId) return false;
+          const award = getObject(row.award);
+          const awardee = getObject(award.awardee);
+          const opportunityUrl = asText(row.uiLink);
+          const sourceUrl = opportunityUrl && /^https:\/\//i.test(opportunityUrl)
+            ? opportunityUrl
+            : 'https://sam.gov/';
+          const payload = JSON.parse(JSON.stringify({
+            recordType: 'federal_contract_opportunity',
+            noticeId,
+            title: asText(row.title),
+            solicitationNumber: asText(row.solicitationNumber),
+            department: asText(row.department),
+            subTier: asText(row.subTier),
+            postedDate: asText(row.postedDate),
+            type: asText(row.type),
+            responseDeadline: asText(row.responseDeadLine ?? row.responseDeadline),
+            naicsCode: asText(row.naicsCode),
+            classificationCode: asText(row.classificationCode),
+            setAside: asText(row.typeOfSetAsideDescription),
+            award: Object.keys(award).length ? award : null,
+            pointOfContact: Array.isArray(row.pointOfContact) ? row.pointOfContact : null,
+            placeOfPerformance: row.placeOfPerformance ?? null,
+            sourceUrl,
+            retrievedAt: retrievedAt.toISOString(),
+          }));
+          await prisma.supplierResearchRecord.upsert({
+            where: { source_sourceRecordId: { source: 'sam.gov_opportunities', sourceRecordId: noticeId } },
+            create: {
+              source: 'sam.gov_opportunities',
+              sourceRecordId: noticeId,
+              supplierName: asText(awardee.name),
+              awardAmount: Number.isFinite(Number(award.amount)) && Number(award.amount) >= 0 ? Number(award.amount) : null,
+              sourceUrl,
+              payload,
+              retrievedAt,
+            },
+            update: {
+              supplierName: asText(awardee.name),
+              awardAmount: Number.isFinite(Number(award.amount)) && Number(award.amount) >= 0 ? Number(award.amount) : null,
+              sourceUrl,
+              payload,
+              retrievedAt,
+            },
+          });
+          return true;
+        }));
+        saved += outcomes.filter(Boolean).length;
+        skipped += outcomes.length - outcomes.filter(Boolean).length;
+      }
+
+      return res.json({
+        ok: true,
+        source: 'SAM.gov Get Opportunities Public API',
+        retrievedAt: retrievedAt.toISOString(),
+        dateRange: { startDate: samDate(start), endDate: samDate(end) },
+        totalMatchingOpportunities: Number(result.totalRecords ?? rows.length),
+        fetched: rows.length,
+        saved,
+        skipped,
+        note: 'Public solicitation research only. Government points of contact are not sales leads; these records are not supplier verification or marketplace revenue.',
+      });
+    } catch (error) {
+      console.error('Scheduled SAM.gov opportunity refresh failed', error);
+      return res.status(502).json({ error: 'Scheduled SAM.gov opportunity refresh failed.' });
+    }
+  });
+
   return router;
 }
