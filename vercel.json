@@ -30,6 +30,10 @@
     {
       "path": "/api/cron/research/federal-awards",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/research/sam-opportunities",
+      "schedule": "30 10 * * *"
     }
   ]
 }
