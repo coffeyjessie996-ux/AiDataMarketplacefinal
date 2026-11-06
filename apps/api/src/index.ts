@@ -13,6 +13,7 @@ import { prisma } from './lib/prisma';
 import { User } from './types';
 import { createPipelineRouter } from './routes/pipeline';
 import { createCronRouter } from './routes/cron';
+import { createDataBankRouter } from './routes/data-bank';
 
 dotenv.config();
 
@@ -191,6 +192,7 @@ function requireRole(roles: string[]) {
 
 app.use('/pipeline', createPipelineRouter(prisma, requireAuth));
 app.use('/cron', createCronRouter(prisma));
+app.use('/data-bank', createDataBankRouter(prisma, requireAuth));
 
 const registerSchema = z.object({
   name: z.string().min(2),
