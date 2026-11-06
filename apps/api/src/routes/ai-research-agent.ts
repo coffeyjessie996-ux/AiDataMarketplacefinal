@@ -22,7 +22,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
 
   // Called by Vercel Cron. It is intentionally small and budget-limited:
   // at most three new records per daily run, with no email or sales actions.
-  router.post('/research-enrichment', async (req, res) => {
+  router.get('/research-enrichment', async (req, res) => {
     const secret = process.env.CRON_SECRET;
     if (!secret) return res.status(503).json({ error: 'AI research agent is not configured: CRON_SECRET is missing.' });
     if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized AI research request.' });
