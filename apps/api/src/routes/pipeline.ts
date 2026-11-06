@@ -9,7 +9,7 @@ const stages = ['NEW', 'QUALIFIED', 'CONTACTED', 'PROPOSAL', 'WON', 'LOST'] as c
 function calculateLeadPriority(input: {
   companyName?: string | null;
   source?: string | null;
-  awardAmount?: number | string | null;
+  awardAmount?: unknown;
   description?: string | null;
   contactName?: string | null;
   email?: string | null;
