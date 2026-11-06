@@ -122,5 +122,67 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
     return res.json({ stages: counts, totalLeads: Object.values(counts).reduce((a, b) => a + b, 0), followUpsDue });
   });
 
+  // Revenue node: only database orders explicitly marked PAID are counted as sales.
+  // Lead award amounts and pipeline stages are intentionally excluded from revenue.
+  router.get('/revenue', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+
+    const orderScope = user.role === 'admin'
+      ? {}
+      : user.role === 'seller'
+        ? { dataset: { sellerId: user.id } }
+        : { buyerId: user.id };
+    const nonDemoOrderFilter = {
+      buyer: { isNot: { email: { endsWith: '@local.test' } } },
+      dataset: {
+        is: {
+          seller: { isNot: { email: { endsWith: '@local.test' } } },
+          title: { not: { contains: '(Sample)' } },
+        },
+      },
+    };
+    const orderWhere = { AND: [orderScope, nonDemoOrderFilter] };
+    const paidOrderWhere = { AND: [orderScope, nonDemoOrderFilter, { status: 'PAID' as const }] };
+    const leadWhere = user.role === 'admin' ? {} : { ownerId: user.id };
+
+    try {
+      const [paidValue, paidOrders, orderStatuses, leadStages, followUpsDue] = await Promise.all([
+        prisma.order.aggregate({ where: paidOrderWhere, _sum: { totalCents: true } }),
+        prisma.order.count({ where: paidOrderWhere }),
+        prisma.order.groupBy({ by: ['status'], where: orderWhere, _count: { _all: true } }),
+        prisma.lead.groupBy({ by: ['stage'], where: leadWhere, _count: { _all: true } }),
+        prisma.lead.count({
+          where: { ...leadWhere, nextFollowUpAt: { lte: new Date() }, stage: { notIn: ['WON', 'LOST'] } },
+        }),
+      ]);
+
+      const orderCounts = { pending: 0, paid: 0, failed: 0, refunded: 0 };
+      for (const item of orderStatuses) orderCounts[item.status.toLowerCase() as keyof typeof orderCounts] = item._count._all;
+      const stageCounts = Object.fromEntries(stages.map((stage) => [stage, 0])) as Record<string, number>;
+      for (const item of leadStages) stageCounts[item.stage] = item._count._all;
+
+      return res.json({
+        source: 'database',
+        updatedAt: new Date().toISOString(),
+        currency: 'USD',
+        actualPaidOrderValueCents: paidValue._sum.totalCents ?? 0,
+        actualPaidOrders: paidOrders,
+        orderCounts,
+        leadStages: stageCounts,
+        totalLeads: Object.values(stageCounts).reduce((sum, count) => sum + count, 0),
+        openLeads: stageCounts.NEW + stageCounts.QUALIFIED + stageCounts.CONTACTED + stageCounts.PROPOSAL,
+        proposals: stageCounts.PROPOSAL,
+        closedWonLeads: stageCounts.WON,
+        followUpsDue,
+        revenueDefinition: 'Database orders marked PAID, excluding local test accounts and sample datasets. This is not processor settlement or net revenue.',
+        pipelineDefinition: 'Lead counts are workflow activity only. Supplier award amounts are not sales or forecast revenue.',
+      });
+    } catch (error) {
+      console.error('Revenue pipeline summary failed', error);
+      return res.status(500).json({ error: 'Unable to load revenue pipeline figures.' });
+    }
+  });
+
   return router;
 }
