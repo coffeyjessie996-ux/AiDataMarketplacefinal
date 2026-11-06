@@ -49,9 +49,11 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
         tasks,
         summary: { running, completedToday, failedToday },
         aiAgents: {
-          enabled: false,
-          status: 'not_connected',
-          note: 'The feed currently tracks real scraper and scheduled collection automations. Autonomous AI-agent execution is not connected yet.',
+          enabled: Boolean(process.env.OPENAI_API_KEY),
+          status: process.env.OPENAI_API_KEY ? 'configured' : 'not_configured',
+          note: process.env.OPENAI_API_KEY
+            ? 'The OpenAI research analyst is configured to analyze up to three new Data Bank records per daily run. It performs research triage only and does not send outreach.'
+            : 'The feed tracks real collection automations. Add OPENAI_API_KEY to the API production environment to enable the scheduled research analyst.',
         },
         pollingIntervalMs: 5000,
       });

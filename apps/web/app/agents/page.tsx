@@ -107,11 +107,11 @@ export default function AgentActivityPage() {
 
         <section style={{ background: '#241b12', border: '1px solid #854d0e', borderRadius: 10, padding: 16, marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-            <strong style={{ color: '#fcd34d' }}>Autonomous AI agents: Not connected</strong>
-            <span style={{ color: '#fbbf24', fontSize: 12 }}>Not running</span>
+            <strong style={{ color: data?.aiAgents.enabled ? '#86efac' : '#fcd34d' }}>{data?.aiAgents.enabled ? 'OpenAI research analyst: Configured' : 'Autonomous AI agents: Not connected'}</strong>
+            <span style={{ color: data?.aiAgents.enabled ? '#86efac' : '#fbbf24', fontSize: 12 }}>{data?.aiAgents.status || 'Checking'}</span>
           </div>
           <p style={{ color: '#f5d9a8', margin: '8px 0 0', lineHeight: 1.5 }}>
-            {data?.aiAgents.note || 'The current feed records real scheduled collectors and scraper jobs. It does not invent AI-agent activity.'}
+            {data?.aiAgents.note || 'The current feed records real scheduled collectors and scraper jobs.'}
           </p>
         </section>
 
@@ -132,7 +132,7 @@ export default function AgentActivityPage() {
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
                         <strong>{task.agentName}</strong>
-                        <span style={{ fontSize: 10, letterSpacing: 1, color: '#93a4bd', border: '1px solid #334155', borderRadius: 20, padding: '3px 7px' }}>AUTOMATION</span>
+                        <span style={{ fontSize: 10, letterSpacing: 1, color: task.agentType === 'ai_agent' ? '#86efac' : '#93a4bd', border: '1px solid #334155', borderRadius: 20, padding: '3px 7px' }}>{task.agentType === 'ai_agent' ? 'AI AGENT' : 'AUTOMATION'}</span>
                       </div>
                       <div style={{ color: '#cbd5e1', marginTop: 5 }}>{task.taskName}</div>
                     </div>

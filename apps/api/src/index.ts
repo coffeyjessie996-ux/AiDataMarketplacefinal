@@ -15,6 +15,7 @@ import { createPipelineRouter } from './routes/pipeline';
 import { createCronRouter } from './routes/cron';
 import { createDataBankRouter } from './routes/data-bank';
 import { createAgentsRouter } from './routes/agents';
+import { createAiResearchAgentRouter } from './routes/ai-research-agent';
 import { finishAgentTask, startAgentTask } from './services/agent-activity';
 
 dotenv.config();
@@ -194,6 +195,7 @@ function requireRole(roles: string[]) {
 
 app.use('/pipeline', createPipelineRouter(prisma, requireAuth));
 app.use('/cron', createCronRouter(prisma));
+app.use('/cron/ai', createAiResearchAgentRouter(prisma));
 app.use('/data-bank', createDataBankRouter(prisma, requireAuth));
 app.use('/agents', createAgentsRouter(prisma, requireAuth));
 
