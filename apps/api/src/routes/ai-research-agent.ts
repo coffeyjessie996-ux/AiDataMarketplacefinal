@@ -20,9 +20,9 @@ function asObject(value: unknown): Record<string, unknown> {
 function safeErrorSummary(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message
-    .replace(/Bearer\\s+\\S+/gi, 'Bearer [redacted]')
-    .replace(/\\bsk-[A-Za-z0-9_-]{8,}\\b/g, '[redacted]')
-    .replace(/(api[_-]?key["'\\s:=]+)[^\\s,"']+/gi, '$1[redacted]')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[redacted]')
+    .replace(/(api[_-]?key["'\s:=]+)[^\s,"']+/gi, '$1[redacted]')
     .slice(0, 220);
 }
 
