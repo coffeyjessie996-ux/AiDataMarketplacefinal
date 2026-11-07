@@ -26,6 +26,11 @@ function safeErrorSummary(error: unknown): string {
     .slice(0, 220);
 }
 
+function isInsufficientOpenAiQuota(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /insufficient_quota|no credits remaining/i.test(message);
+}
+
 export function createAiResearchAgentRouter(prisma: PrismaClient) {
   const router = Router();
 
@@ -48,6 +53,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
     let saved = 0;
     let failed = 0;
     const failureDetails: string[] = [];
+    let blockedByQuota = false;
     try {
       const candidates = await prisma.supplierResearchRecord.findMany({
         orderBy: [{ retrievedAt: 'desc' }],
@@ -100,6 +106,11 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
           const detail = safeErrorSummary(error);
           if (failureDetails.length < 3) failureDetails.push(detail);
           console.error('AI research analysis failed for record', record.id, detail);
+          if (isInsufficientOpenAiQuota(error)) {
+            blockedByQuota = true;
+            failureDetails[0] = 'OpenAI API quota is exhausted; stopped after the first failure to avoid repeated requests.';
+            break;
+          }
         }
       }
 
@@ -118,6 +129,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
         processed,
         analyzed: saved,
         failed,
+        blockedByQuota,
         dailyLimit: 3,
         note: 'AI triage is an aid to research only. It does not verify suppliers, create sales, send outreach, or count as revenue.',
       });
