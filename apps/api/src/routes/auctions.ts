@@ -57,7 +57,7 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
   router.post('/', auth, async (req: AuthReq, res) => {
     const user = req.user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
-    if (!['seller', 'admin'].includes(user.role)) return res.status(403).json({ error: 'A seller account is required to create an auction.' });
+    if (!['SELLER', 'ADMIN'].includes(user.role)) return res.status(403).json({ error: 'A seller account is required to create an auction.' });
 
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -70,7 +70,7 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
       const dataset = await prisma.dataset.findUnique({ where: { id: parsed.data.datasetId } });
       if (!dataset || dataset.status !== 'PUBLISHED') return res.status(404).json({ error: 'Only an existing published dataset can be auctioned.' });
       if (dataset.licenseType === 'RESTRICTED') return res.status(400).json({ error: 'Restricted datasets cannot be auctioned.' });
-      if (user.role !== 'admin' && dataset.sellerId !== user.id) return res.status(403).json({ error: 'You can only auction your own dataset.' });
+      if (user.role !== 'ADMIN' && dataset.sellerId !== user.id) return res.status(403).json({ error: 'You can only auction your own dataset.' });
 
       const auction = await prisma.auction.create({
         data: {
@@ -92,13 +92,18 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
   router.get('/:auctionId/bids', auth, async (req: AuthReq, res) => {
     const user = req.user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    const auctionIdParam = req.params.auctionId;
+    const auctionId = Array.isArray(auctionIdParam) ? auctionIdParam[0] : auctionIdParam;
+    if (!auctionId) return res.status(400).json({ error: 'Auction ID is required.' });
     try {
-      const auction = await prisma.auction.findUnique({
-        where: { id: req.params.auctionId },
-        include: { dataset: { select: { sellerId: true } } },
-      });
+      const auction = await prisma.auction.findUnique({ where: { id: auctionId } });
       if (!auction) return res.status(404).json({ error: 'Auction not found.' });
-      if (user.role !== 'admin' && auction.dataset.sellerId !== user.id) {
+      const dataset = await prisma.dataset.findUnique({
+        where: { id: auction.datasetId },
+        select: { sellerId: true },
+      });
+      if (!dataset) return res.status(404).json({ error: 'Auction dataset not found.' });
+      if (user.role !== 'ADMIN' && dataset.sellerId !== user.id) {
         return res.status(403).json({ error: 'Only the dataset owner can review offers.' });
       }
       const bids = await prisma.auctionBid.findMany({
@@ -125,15 +130,22 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
     try {
+      const auctionIdParam = req.params.auctionId;
+      const auctionId = Array.isArray(auctionIdParam) ? auctionIdParam[0] : auctionIdParam;
+      if (!auctionId) return res.status(400).json({ error: 'Auction ID is required.' });
       const result = await prisma.$transaction(async (tx) => {
-        const auction = await tx.auction.findUnique({
-          where: { id: req.params.auctionId },
-          include: { dataset: { select: { sellerId: true, status: true } } },
-        });
-        if (!auction || auction.status !== 'OPEN' || auction.closesAt <= new Date() || auction.dataset.status !== 'PUBLISHED') {
+        const auction = await tx.auction.findUnique({ where: { id: auctionId } });
+        if (!auction || auction.status !== 'OPEN' || auction.closesAt <= new Date()) {
           return { error: 'This auction is not open for bidding.', status: 404 as const };
         }
-        if (auction.dataset.sellerId === user.id) return { error: 'You cannot bid on your own dataset.', status: 403 as const };
+        const dataset = await tx.dataset.findUnique({
+          where: { id: auction.datasetId },
+          select: { sellerId: true, status: true, licenseType: true },
+        });
+        if (!dataset || dataset.status !== 'PUBLISHED' || dataset.licenseType === 'RESTRICTED') {
+          return { error: 'This auction is not open for bidding.', status: 404 as const };
+        }
+        if (dataset.sellerId === user.id) return { error: 'You cannot bid on your own dataset.', status: 403 as const };
         const highest = await tx.auctionBid.findFirst({
           where: { auctionId: auction.id, status: 'ACTIVE' },
           orderBy: [{ amountCents: 'desc' }, { createdAt: 'asc' }],
@@ -151,7 +163,7 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
         return { bid };
       }, { isolationLevel: 'Serializable' });
 
-      if ('error' in result) return res.status(result.status).json({ error: result.error });
+      if ('error' in result) return res.status(result.status ?? 400).json({ error: result.error });
       return res.status(201).json({ bid: result.bid, note: 'Offer recorded only. This is not a purchase and no payment has been taken.' });
     } catch (error) {
       console.error('Auction bid failed', error);
