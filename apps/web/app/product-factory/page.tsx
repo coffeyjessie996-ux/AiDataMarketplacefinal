@@ -15,7 +15,9 @@ type ResearchRecord = {
   quality: { populatedFieldCount: number; hasSupplierName: boolean; hasSourceLink: boolean; classification: string };
 };
 
-type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; licenseStatus: string; createdAt: string };\n\ntype CreatedProduct = {
+type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; licenseStatus: string; createdAt: string };
+
+type CreatedProduct = {
   id: string;
   title: string;
   status: string;
@@ -27,7 +29,8 @@ type SavedProduct = { id: string; title: string; category: string; qualityScore:
 };
 
 export default function ProductFactoryPage() {
-  const [records, setRecords] = useState<ResearchRecord[]>([]);\n  const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
+  const [records, setRecords] = useState<ResearchRecord[]>([]);
+  const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Supplier intelligence');
@@ -48,10 +51,16 @@ export default function ProductFactoryPage() {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch(`${API}/data-bank/records?page=1&limit=50`, { headers: headers() });
+      const [response, productResponse] = await Promise.all([
+        fetch(`${API}/data-bank/records?page=1&limit=50`, { headers: headers() }),
+        fetch(`${API}/data-bank/products`, { headers: headers() }),
+      ]);
       const data = await response.json();
+      const productData = await productResponse.json();
       if (!response.ok) throw new Error(data.error || 'Could not load saved research records.');
+      if (!productResponse.ok) throw new Error(productData.error || 'Could not load saved product drafts.');
       setRecords(Array.isArray(data.records) ? data.records : []);
+      setSavedProducts(Array.isArray(productData.products) ? productData.products : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load saved research.');
     } finally {
