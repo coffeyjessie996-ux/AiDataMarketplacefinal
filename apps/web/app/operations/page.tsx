@@ -40,7 +40,7 @@ export default function OperationsPage() {
   useEffect(() => { void load(); }, []);
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100 sm:px-8">
+    <main className="ops-page min-h-screen bg-slate-950 px-4 py-8 text-slate-100 sm:px-8">
       <div className="mx-auto max-w-6xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div><p className="text-sm uppercase tracking-widest text-cyan-400">AI Data Marketplace</p><h1 className="text-3xl font-bold">Operations health</h1><p className="mt-1 text-sm text-slate-400">Live checks from recorded database activity. No sample figures.</p></div>
