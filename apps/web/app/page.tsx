@@ -75,6 +75,7 @@ export default function HomePage() {
             <a href="#automation">Automation</a>
             <a href="#money">Revenue</a>
             <a href="/suppliers">Supplier research</a>
+            <a href="/for-businesses">For business buyers</a>
           </div>
           <div className="auth-nav">
             <a href="/login" className="secondary-button">Sign in</a>
