@@ -16,6 +16,7 @@ import { createCronRouter } from './routes/cron';
 import { createDataBankRouter } from './routes/data-bank';
 import { createAgentsRouter } from './routes/agents';
 import { createAiResearchAgentRouter } from './routes/ai-research-agent';
+import { createOperationsRouter } from './routes/operations';
 import { finishAgentTask, startAgentTask } from './services/agent-activity';
 
 dotenv.config();
@@ -198,6 +199,7 @@ app.use('/cron', createCronRouter(prisma));
 app.use('/cron/ai', createAiResearchAgentRouter(prisma));
 app.use('/data-bank', createDataBankRouter(prisma, requireAuth));
 app.use('/agents', createAgentsRouter(prisma, requireAuth));
+app.use('/operations', createOperationsRouter(prisma, requireAuth));
 
 const registerSchema = z.object({
   name: z.string().min(2),
