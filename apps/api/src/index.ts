@@ -385,7 +385,11 @@ app.get('/datasets', async (req, res) => {
     if (normalizedQuery.length >= 2) {
       // Store search intent only: no IP address, email, account ID, or browser fingerprint.
       await prisma.buyerDemandEvent.create({
-        data: {\n          query: normalizedQuery,\n          category: datasets.find((dataset) => dataset.category.toLowerCase() === normalizedQuery)?.category ?? null,\n          resultCount: datasets.length,\n        },
+        data: {
+          query: normalizedQuery,
+          category: datasets.find((dataset) => dataset.category.toLowerCase() === normalizedQuery)?.category ?? null,
+          resultCount: datasets.length,
+        },
       });
     }
     return res.json({
