@@ -57,7 +57,7 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
   router.post('/', auth, async (req: AuthReq, res) => {
     const user = req.user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
-    if (!['SELLER', 'ADMIN'].includes(user.role)) return res.status(403).json({ error: 'A seller account is required to create an auction.' });
+    if (!['seller', 'admin'].includes(user.role)) return res.status(403).json({ error: 'A seller account is required to create an auction.' });
 
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -70,7 +70,7 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
       const dataset = await prisma.dataset.findUnique({ where: { id: parsed.data.datasetId } });
       if (!dataset || dataset.status !== 'PUBLISHED') return res.status(404).json({ error: 'Only an existing published dataset can be auctioned.' });
       if (dataset.licenseType === 'RESTRICTED') return res.status(400).json({ error: 'Restricted datasets cannot be auctioned.' });
-      if (user.role !== 'ADMIN' && dataset.sellerId !== user.id) return res.status(403).json({ error: 'You can only auction your own dataset.' });
+      if (user.role !== 'admin' && dataset.sellerId !== user.id) return res.status(403).json({ error: 'You can only auction your own dataset.' });
 
       const auction = await prisma.auction.create({
         data: {
@@ -103,7 +103,7 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
         select: { sellerId: true },
       });
       if (!dataset) return res.status(404).json({ error: 'Auction dataset not found.' });
-      if (user.role !== 'ADMIN' && dataset.sellerId !== user.id) {
+      if (user.role !== 'admin' && dataset.sellerId !== user.id) {
         return res.status(403).json({ error: 'Only the dataset owner can review offers.' });
       }
       const bids = await prisma.auctionBid.findMany({
