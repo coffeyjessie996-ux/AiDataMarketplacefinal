@@ -271,7 +271,6 @@ model Auction {
   datasetId          String
   dataset            Dataset      @relation(fields: [datasetId], references: [id], onDelete: Cascade)
   startingBidCents   Int
-  reservePriceCents  Int?
   minimumIncrementCents Int      @default(100)
   currency           String       @default("USD")
   status             String       @default("OPEN")
