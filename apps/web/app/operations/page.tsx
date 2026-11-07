@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import './operations.css';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
