@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -64,7 +64,7 @@ export default function HomePage() {
     fetchData();
   }, []);
 
-  const searchMarketplace = async (event: React.FormEvent) => {
+  const searchMarketplace = async (event: FormEvent) => {
     event.preventDefault();
     setLoading(true);
     try {
