@@ -8,13 +8,9 @@ type AuthReq = express.Request & { user?: User };
 const createSchema = z.object({
   datasetId: z.string().min(1),
   startingBidCents: z.number().int().positive().max(100_000_000),
-  reservePriceCents: z.number().int().positive().max(100_000_000).optional(),
   minimumIncrementCents: z.number().int().positive().max(10_000_000).default(100),
   closesAt: z.string().datetime(),
   rightsConfirmed: z.literal(true),
-}).refine((value) => !value.reservePriceCents || value.reservePriceCents >= value.startingBidCents, {
-  message: 'Reserve price must be at least the starting bid.',
-  path: ['reservePriceCents'],
 });
 
 const bidSchema = z.object({
@@ -44,7 +40,6 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
           dataset: auction.dataset,
           startingBidCents: auction.startingBidCents,
           currentBidCents: auction.bids[0]?.amountCents ?? null,
-          reservePriceCents: auction.reservePriceCents,
           minimumIncrementCents: auction.minimumIncrementCents,
           currency: auction.currency,
           bidCount: auction._count.bids,
@@ -81,7 +76,6 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
         data: {
           datasetId: dataset.id,
           startingBidCents: parsed.data.startingBidCents,
-          reservePriceCents: parsed.data.reservePriceCents,
           minimumIncrementCents: parsed.data.minimumIncrementCents,
           closesAt,
           rightsConfirmedAt: new Date(),
@@ -92,6 +86,35 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
     } catch (error) {
       console.error('Auction creation failed', error);
       return res.status(500).json({ error: 'Unable to create auction.' });
+    }
+  });
+
+  router.get('/:auctionId/bids', auth, async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    try {
+      const auction = await prisma.auction.findUnique({
+        where: { id: req.params.auctionId },
+        include: { dataset: { select: { sellerId: true } } },
+      });
+      if (!auction) return res.status(404).json({ error: 'Auction not found.' });
+      if (user.role !== 'admin' && auction.dataset.sellerId !== user.id) {
+        return res.status(403).json({ error: 'Only the dataset owner can review offers.' });
+      }
+      const bids = await prisma.auctionBid.findMany({
+        where: { auctionId: auction.id, status: 'ACTIVE' },
+        include: { bidder: { select: { name: true } } },
+        orderBy: [{ amountCents: 'desc' }, { createdAt: 'asc' }],
+      });
+      return res.json({ bids: bids.map((bid) => ({
+        id: bid.id,
+        bidderName: bid.bidder.name,
+        amountCents: bid.amountCents,
+        createdAt: bid.createdAt.toISOString(),
+      })) });
+    } catch (error) {
+      console.error('Auction offers lookup failed', error);
+      return res.status(500).json({ error: 'Unable to load auction offers.' });
     }
   });
 
