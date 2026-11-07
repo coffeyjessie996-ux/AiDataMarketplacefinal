@@ -146,7 +146,7 @@ export default function AuctionsPage() {
       {notice && <p role="status" style={{ padding: 12, border: '1px solid #16a34a', borderRadius: 8 }}>{notice}</p>}
       {error && <p role="alert" style={{ padding: 12, border: '1px solid #dc2626', borderRadius: 8 }}>{error}</p>}
 
-      {['SELLER', 'ADMIN'].includes(role) && token && (
+      {['seller', 'admin'].includes(role) && token && (
         <section style={{ padding: 20, border: '1px solid #475569', borderRadius: 12, marginBottom: 28 }}>
           <h2 style={{ fontSize: 22, marginTop: 0 }}>List a dataset for bids</h2>
           <form onSubmit={createAuction} style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', alignItems: 'end' }}>
@@ -187,7 +187,7 @@ export default function AuctionsPage() {
                 <div><strong>Starting bid:</strong> {money(auction.startingBidCents)}</div>
                 <div><strong>Offers:</strong> {auction.bidCount}</div>
                 <div><strong>Closes:</strong> {new Date(auction.closesAt).toLocaleString()}</div>
-                {(['SELLER', 'ADMIN'].includes(role) && token) && (
+                {(['seller', 'admin'].includes(role) && token) && (
                   <div>
                     <button type="button" onClick={() => viewOffers(auction.id)} style={{ padding: 8, borderRadius: 8 }}>Review offers</button>
                     {(offers[auction.id] || []).map(offer => (
