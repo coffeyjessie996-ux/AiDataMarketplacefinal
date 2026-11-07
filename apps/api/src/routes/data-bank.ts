@@ -153,12 +153,17 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
           tags: true,
         },
       });
+      const readTag = (tags: string[], prefix: string) => tags.find((tag) => tag.startsWith(prefix))?.slice(prefix.length) ?? '';
       return res.json({
         products: products.map((product) => ({
           id: product.id, title: product.title, category: product.category,
           qualityScore: product.qualityScore, sourceCount: product.sourceCount,
           recordCount: product.tags.filter((tag) => tag.startsWith('source-record-id:')).length,
-          status: product.status.toLowerCase(), licenseStatus: product.licenseType === 'RESTRICTED' ? 'review_required' : 'unknown',
+          status: product.status.toLowerCase(),
+          licenseStatus: readTag(product.tags, 'license-review-status:') || 'pending',
+          licenseReviewNote: (() => { try { return decodeURIComponent(readTag(product.tags, 'license-review-note:')); } catch { return ''; } })(),
+          licenseEvidenceUrl: (() => { try { return decodeURIComponent(readTag(product.tags, 'license-review-evidence:')); } catch { return ''; } })(),
+          licenseReviewedAt: readTag(product.tags, 'license-review-at:') || null,
           createdAt: product.createdAt,
         })),
       });
@@ -260,6 +265,53 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
     } catch (error) {
       console.error('Product Factory draft creation failed', error);
       return res.status(500).json({ error: 'Unable to create product draft.' });
+    }
+  });
+
+  // Seller-entered source review notes are metadata only; this never grants legal clearance
+  // or changes the Dataset's DRAFT / RESTRICTED state.
+  router.post('/products/:id/licensing-review', async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    if (!['seller', 'admin'].includes(user.role)) return res.status(403).json({ error: 'A seller or admin account is required.' });
+    const schema = z.object({
+      status: z.enum(['pending', 'seller_reviewed', 'blocked']),
+      note: z.string().trim().min(10).max(1000),
+      evidenceUrl: z.string().trim().url().max(500).optional().or(z.literal('')),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Enter a review note of at least 10 characters and a valid evidence URL when provided.' });
+    if (parsed.data.status === 'seller_reviewed' && !parsed.data.evidenceUrl) {
+      return res.status(400).json({ error: 'Add a source terms or licensing evidence URL before marking this review as seller-reviewed.' });
+    }
+    try {
+      const productId = String(req.params.id);
+      const product = await prisma.dataset.findFirst({
+        where: { id: productId, sellerId: user.id, tags: { has: 'factory:v1' } },
+        select: { id: true, tags: true },
+      });
+      if (!product) return res.status(404).json({ error: 'Product draft not found.' });
+      const prefixes = ['license-review-status:', 'license-review-note:', 'license-review-evidence:', 'license-review-at:', 'license-reviewer:'];
+      const retainedTags = product.tags.filter((tag) => !prefixes.some((prefix) => tag.startsWith(prefix)));
+      const reviewedAt = new Date().toISOString();
+      const tags = [
+        ...retainedTags,
+        `license-review-status:${parsed.data.status}`,
+        `license-review-note:${encodeURIComponent(parsed.data.note)}`,
+        ...(parsed.data.evidenceUrl ? [`license-review-evidence:${encodeURIComponent(parsed.data.evidenceUrl)}`] : []),
+        `license-review-at:${reviewedAt}`,
+        `license-reviewer:${user.id}`,
+      ];
+      await prisma.dataset.update({ where: { id: product.id }, data: { tags } });
+      return res.json({
+        review: { status: parsed.data.status, note: parsed.data.note, evidenceUrl: parsed.data.evidenceUrl || null, reviewedAt },
+        productState: 'draft',
+        licenseType: 'restricted',
+        message: 'Review metadata saved. This does not establish legal permission to redistribute or publish the data.',
+      });
+    } catch (error) {
+      console.error('Product licensing review save failed', error);
+      return res.status(500).json({ error: 'Unable to save licensing review.' });
     }
   });
 
