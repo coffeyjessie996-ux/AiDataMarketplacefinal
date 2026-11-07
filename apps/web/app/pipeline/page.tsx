@@ -13,7 +13,8 @@ type RevenueSummary = {
   revenueDefinition: string; pipelineDefinition: string; updatedAt: string;
 };
 
-type SalesDraft = { subject: string; emailBody: string; rationale: string; missingInformation: string[]; suggestedNextStep: string; requiresHumanReview: boolean; sendStatus: string };\ntype ClosePlan = { dealReadiness: string; qualificationGaps: string[]; likelyObjections: { objection: string; evidenceBasedResponse: string }[]; closingPlan: string[]; suggestedCloseMessage: string; nextBestAction: string; confidenceNote: string; status: string };
+type SalesDraft = { subject: string; emailBody: string; rationale: string; missingInformation: string[]; suggestedNextStep: string; requiresHumanReview: boolean; sendStatus: string };
+type ClosePlan = { dealReadiness: string; qualificationGaps: string[]; likelyObjections: { objection: string; evidenceBasedResponse: string }[]; closingPlan: string[]; suggestedCloseMessage: string; nextBestAction: string; confidenceNote: string; status: string };
 
 type Lead = {
   id: string; companyName: string; source: string; sourceRecordId?: string | null;
@@ -33,7 +34,9 @@ export default function PipelinePage() {
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<SalesDraft | null>(null);
   const [draftLead, setDraftLead] = useState('');
-  const [draftBusy, setDraftBusy] = useState('');\n  const [closePlan, setClosePlan] = useState<ClosePlan | null>(null);\n  const [closePlanLead, setClosePlanLead] = useState('');\n  const [closeBusy, setCloseBusy] = useState('');
+  const [draftBusy, setDraftBusy] = useState('');\n  const [closePlan, setClosePlan] = useState<ClosePlan | null>(null);
+  const [closePlanLead, setClosePlanLead] = useState('');
+  const [closeBusy, setCloseBusy] = useState('');
 
   const headers = () => {
     const token = localStorage.getItem('auth_token');
