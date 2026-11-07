@@ -90,6 +90,7 @@ export default function ProductFactoryPage() {
       if (!response.ok) throw new Error(data.error || 'Could not create product draft.');
       setProduct(data.product);
       setNotice('Product draft saved. It is private, unpublished, and not cleared for redistribution.');
+      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create product draft.');
     } finally {
@@ -112,6 +113,18 @@ export default function ProductFactoryPage() {
             Assemble real records already saved in your Data Bank into a private product draft. Source links and collection dates are retained, and a transparent completeness score is calculated from the records.
           </p>
         </header>
+
+        <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16, marginBottom: 18 }}>
+          <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>Saved product drafts</h2>
+          {savedProducts.length === 0 ? <p style={{ color: '#94a3b8' }}>No product drafts have been created yet.</p> : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {savedProducts.map(item => <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: 10, background: '#0e1828', borderRadius: 8 }}>
+                <span><strong>{item.title}</strong><span style={{ display: 'block', color: '#94a3b8', fontSize: 12 }}>{item.category} · {item.recordCount} records · {item.sourceCount} sources · {new Date(item.createdAt).toLocaleDateString()}</span></span>
+                <span style={{ color: '#fbbf24', fontSize: 12 }}>{item.status.toUpperCase()} · {item.licenseStatus.replaceAll('_', ' ')}</span>
+              </div>)}
+            </div>
+          )}
+        </section>
 
         <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16, marginBottom: 18 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
