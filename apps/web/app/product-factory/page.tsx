@@ -15,7 +15,7 @@ type ResearchRecord = {
   quality: { populatedFieldCount: number; hasSupplierName: boolean; hasSourceLink: boolean; classification: string };
 };
 
-type CreatedProduct = {
+type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; licenseStatus: string; createdAt: string };\n\ntype CreatedProduct = {
   id: string;
   title: string;
   status: string;
@@ -27,7 +27,7 @@ type CreatedProduct = {
 };
 
 export default function ProductFactoryPage() {
-  const [records, setRecords] = useState<ResearchRecord[]>([]);
+  const [records, setRecords] = useState<ResearchRecord[]>([]);\n  const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Supplier intelligence');
