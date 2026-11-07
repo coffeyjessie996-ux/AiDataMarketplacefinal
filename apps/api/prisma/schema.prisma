@@ -23,6 +23,7 @@ model User {
   payouts       Payout[]
   orders        Order[]
   assignedLeads Lead[]
+  demandEvents  BuyerDemandEvent[]
 }
 
 model WalletAccount {
@@ -93,6 +94,18 @@ model WalletTransaction {
   status      TransactionStatus @default(COMPLETED)
   referenceId String?
   createdAt   DateTime @default(now())
+}
+
+model BuyerDemandEvent {
+  id          String   @id @default(cuid())
+  query       String
+  category    String?
+  resultCount Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([query, createdAt])
+  @@index([category, createdAt])
 }
 
 model SupplierResearchRecord {
