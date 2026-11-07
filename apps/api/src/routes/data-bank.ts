@@ -268,8 +268,9 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
     const user = req.user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
     try {
+      const productId = String(req.params.id);
       const product = await prisma.dataset.findFirst({
-        where: { id: req.params.id, sellerId: user.id, tags: { has: 'factory:v1' } },
+        where: { id: productId, sellerId: user.id, tags: { has: 'factory:v1' } },
         select: { id: true, title: true, tags: true, qualityScore: true, status: true, licenseType: true },
       });
       if (!product) return res.status(404).json({ error: 'Product draft not found.' });
