@@ -13,7 +13,7 @@ type RevenueSummary = {
   revenueDefinition: string; pipelineDefinition: string; updatedAt: string;
 };
 
-type SalesDraft = { subject: string; emailBody: string; rationale: string; missingInformation: string[]; suggestedNextStep: string; requiresHumanReview: boolean; sendStatus: string };
+type SalesDraft = { subject: string; emailBody: string; rationale: string; missingInformation: string[]; suggestedNextStep: string; requiresHumanReview: boolean; sendStatus: string };\ntype ClosePlan = { dealReadiness: string; qualificationGaps: string[]; likelyObjections: { objection: string; evidenceBasedResponse: string }[]; closingPlan: string[]; suggestedCloseMessage: string; nextBestAction: string; confidenceNote: string; status: string };
 
 type Lead = {
   id: string; companyName: string; source: string; sourceRecordId?: string | null;
@@ -33,7 +33,7 @@ export default function PipelinePage() {
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<SalesDraft | null>(null);
   const [draftLead, setDraftLead] = useState('');
-  const [draftBusy, setDraftBusy] = useState('');
+  const [draftBusy, setDraftBusy] = useState('');\n  const [closePlan, setClosePlan] = useState<ClosePlan | null>(null);\n  const [closePlanLead, setClosePlanLead] = useState('');\n  const [closeBusy, setCloseBusy] = useState('');
 
   const headers = () => {
     const token = localStorage.getItem('auth_token');
@@ -97,6 +97,19 @@ export default function PipelinePage() {
       setMessage(`AI created a draft for ${lead.companyName}. It has not been sent.`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not create AI sales draft.'); }
     finally { setDraftBusy(''); }
+  };
+
+
+  const createClosePlan = async (lead: Lead) => {
+    setCloseBusy(lead.id); setClosePlan(null); setClosePlanLead(''); setError(''); setMessage('');
+    try {
+      const response = await fetch(`${API}/pipeline/leads/${lead.id}/close-plan`, { method: 'POST', headers: headers(), body: '{}' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not create deal close plan.');
+      setClosePlan(data.closePlan); setClosePlanLead(lead.id);
+      setMessage(`AI deal closer prepared a plan for ${lead.companyName}. Nothing was sent and the deal stage was not changed.`);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create deal close plan.'); }
+    finally { setCloseBusy(''); }
   };
 
   const changeStage = async (lead: Lead, stage: string) => {
@@ -183,19 +196,32 @@ export default function PipelinePage() {
         <button onClick={() => { void navigator.clipboard.writeText(`Subject: ${draft.subject}\n\n${draft.emailBody}`); }} style={{ padding: '9px 12px', background: '#0f766e', color: 'white', border: 0, borderRadius: 6 }}>Copy draft</button>
         <button onClick={() => setDraft(null)} style={{ padding: '9px 12px', marginLeft: 8, background: '#334155', color: 'white', border: 0, borderRadius: 6 }}>Close</button>
       </section>}
+
+      {closePlan && <section aria-label="AI deal close plan" style={{ background: '#182638', border: '1px solid #0f766e', borderRadius: 10, padding: 16, margin: '14px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}><strong>AI deal closer · {leads.find(l => l.id === closePlanLead)?.companyName || 'Lead'}</strong><span style={{ color: '#fbbf24', fontSize: 12 }}>PLAN ONLY · NOT SENT</span></div>
+        <p><strong>Readiness:</strong> {closePlan.dealReadiness.replaceAll('_', ' ')}</p>
+        <p style={{ color: '#b8c6d9' }}>{closePlan.confidenceNote}</p>
+        {closePlan.qualificationGaps.length > 0 && <><strong>What we still need to learn</strong><ul>{closePlan.qualificationGaps.map((item, i) => <li key={i}>{item}</li>)}</ul></>}
+        {closePlan.likelyObjections.length > 0 && <><strong>Possible objections and grounded responses</strong>{closePlan.likelyObjections.map((item, i) => <div key={i} style={{ margin: '8px 0', padding: 10, background: '#101a2b', borderRadius: 7 }}><strong>{item.objection}</strong><p style={{ marginBottom: 0, color: '#b8c6d9' }}>{item.evidenceBasedResponse}</p></div>)}</>}
+        {closePlan.closingPlan.length > 0 && <><strong>Closing steps</strong><ol>{closePlan.closingPlan.map((item, i) => <li key={i}>{item}</li>)}</ol></>}
+        <p><strong>Next best action:</strong> {closePlan.nextBestAction}</p>
+        {closePlan.suggestedCloseMessage && <><strong>Suggested message</strong><pre style={{ whiteSpace: 'pre-wrap', font: 'inherit', lineHeight: 1.5 }}>{closePlan.suggestedCloseMessage}</pre><button onClick={() => { void navigator.clipboard.writeText(closePlan.suggestedCloseMessage); }} style={{ padding: '9px 12px', background: '#0f766e', color: 'white', border: 0, borderRadius: 6 }}>Copy suggested message</button></>}
+        <button onClick={() => setClosePlan(null)} style={{ padding: '9px 12px', marginLeft: 8, background: '#334155', color: 'white', border: 0, borderRadius: 6 }}>Close</button>
+      </section>}
       <section style={{ border: '1px solid #26364d', borderRadius: 12, overflow: 'hidden', background: '#101a2b' }}>
         <div style={{ padding: 14, borderBottom: '1px solid #26364d' }}>Lead records ({leads.length})</div>
         {leads.length === 0 ? <p style={{ padding: 18, color: '#94a3b8' }}>No leads yet. Fetch federal award records in Supplier Research, then import them here.</p> :
           <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', minWidth: 1040, borderCollapse: 'collapse' }}>
-            <thead><tr style={{ textAlign: 'left', color: '#93a4bd' }}>{['Company & award details','Award amount','Contact details','Priority score','Stage','Next follow-up','AI sales'].map(x => <th key={x} style={{ padding: 12 }}>{x}</th>)}</tr></thead>
+            <thead><tr style={{ textAlign: 'left', color: '#93a4bd' }}>{['Company & award details','Award amount','Contact details','Priority score','Stage','Next follow-up','AI sales','AI deal closer'].map(x => <th key={x} style={{ padding: 12 }}>{x}</th>)}</tr></thead>
             <tbody>{leads.map(lead => <tr key={lead.id}>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 260 }}><strong>{lead.companyName}</strong><div style={{ fontSize: 12, color: '#93a4bd', marginTop: 4 }}>{lead.description || 'No additional award details supplied.'}</div><div style={{ fontSize: 11, color: '#8291a7', marginTop: 4 }}>Source: {lead.source} · Record: {lead.sourceRecordId || 'not supplied'}</div></td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', whiteSpace: 'nowrap' }}>{money(lead.awardAmount)}</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}>{lead.email ? <a href={`mailto:${lead.email}`} style={{ color: '#93c5fd' }}>{lead.email}</a> : lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: '#93c5fd' }}>Company website</a> : <span style={{ color: '#fbbf24' }}>Not provided by source</span>}</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>{lead.score}/100</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><select value={lead.stage} onChange={e => void changeStage(lead,e.target.value)} style={{ padding: 8, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }}>{stages.map(s => <option key={s} value={s}>{s}</option>)}</select></td>
-              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><button onClick={() => void createAiDraft(lead)} disabled={Boolean(draftBusy)} style={{ padding: '8px 10px', background: '#1d4ed8', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer' }}>{draftBusy === lead.id ? 'Drafting…' : 'Create AI draft'}</button></td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><input aria-label={`Follow-up date for ${lead.companyName}`} type="date" value={lead.nextFollowUpAt ? lead.nextFollowUpAt.slice(0,10) : ''} onChange={e => void changeFollowUp(lead,e.target.value)} style={{ padding: 7, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }} /></td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><button onClick={() => void createAiDraft(lead)} disabled={Boolean(draftBusy)} style={{ padding: '8px 10px', background: '#1d4ed8', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer' }}>{draftBusy === lead.id ? 'Drafting…' : 'Create AI draft'}</button></td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><button onClick={() => void createClosePlan(lead)} disabled={Boolean(closeBusy)} style={{ padding: '8px 10px', background: '#0f766e', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer' }}>{closeBusy === lead.id ? 'Planning…' : 'Build close plan'}</button></td>
             </tr>)}</tbody>
           </table></div>}
       </section>
