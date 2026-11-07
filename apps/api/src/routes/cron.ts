@@ -201,6 +201,28 @@ export function createCronRouter(prisma: PrismaClient) {
         headers: { accept: 'application/json', 'user-agent': 'AI-Data-Marketplace/1.0 (public federal opportunity research)' },
         signal: AbortSignal.timeout(20000),
       });
+      if (response.status === 404) {
+        // The official Get Opportunities API documents HTTP 404 as "No Data found".
+        // Treat an empty search window as a successful zero-result collection, not an outage.
+        await finishAgentTask(prisma, taskId, 'COMPLETED', {
+          message: 'SAM.gov returned HTTP 404 (no matching opportunities for this search window).',
+          recordsFetched: 0,
+          recordsSaved: 0,
+          recordsFailed: 0,
+        });
+        return res.json({
+          ok: true,
+          source: 'SAM.gov Get Opportunities Public API',
+          retrievedAt: retrievedAt.toISOString(),
+          dateRange: { startDate: samDate(start), endDate: samDate(end) },
+          totalMatchingOpportunities: 0,
+          fetched: 0,
+          saved: 0,
+          skipped: 0,
+          note: 'SAM.gov reported no matching opportunities for this date range and notice-type filter. This is an empty result, not a collector outage.',
+        });
+      }
+
       if (!response.ok) {
         await finishAgentTask(prisma, taskId, 'FAILED', { message: `SAM.gov returned HTTP ${response.status}.` });
         return res.status(502).json({ error: 'SAM.gov returned an error.', sourceStatus: response.status });
