@@ -142,6 +142,8 @@ export default function DashboardPage() {
           <a className="nav-item" href="/suppliers">🔎 Supplier research</a>
           <a className="nav-item" href="/data-bank">🗄️ AI Data Bank</a>
           <a className="nav-item" href="/product-factory">🏭 Data Product Factory</a>
+          {(user?.role === 'seller' || user?.role === 'admin') && <a className="nav-item" href="/demand">📊 Buyer demand intelligence</a>}
+          {(user?.role === 'seller' || user?.role === 'admin') && <a className="nav-item" href="/pricing">💲 Pricing intelligence</a>}
           <a className="nav-item" href="/agents">🤖 Agent activity feed</a>
           <a className="nav-item" href="/pipeline">📈 Lead &amp; sales pipeline</a>
           {user?.role === 'admin' && <a className="nav-item" href="/operations">🩺 Operations health</a>}

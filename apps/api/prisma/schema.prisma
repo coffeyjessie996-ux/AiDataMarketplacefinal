@@ -97,6 +97,18 @@ model WalletTransaction {
   createdAt   DateTime @default(now())
 }
 
+model BuyerDemandEvent {
+  id          String   @id @default(cuid())
+  query       String
+  category    String?
+  resultCount Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([query, createdAt])
+  @@index([category, createdAt])
+}
+
 model SupplierResearchRecord {
   id             String   @id @default(cuid())
   source         String
