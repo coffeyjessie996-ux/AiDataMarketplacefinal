@@ -15,7 +15,8 @@ type ResearchRecord = {
   quality: { populatedFieldCount: number; hasSupplierName: boolean; hasSourceLink: boolean; classification: string };
 };
 
-type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; licenseStatus: string; createdAt: string };
+type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; licenseStatus: string; licenseReviewNote: string; licenseEvidenceUrl: string; licenseReviewedAt: string | null; createdAt: string };
+type ReviewDraft = { status: 'pending' | 'seller_reviewed' | 'blocked'; note: string; evidenceUrl: string };
 
 type CreatedProduct = {
   id: string;
@@ -35,6 +36,8 @@ export default function ProductFactoryPage() {
   const [recordTotal, setRecordTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
+  const [savingReview, setSavingReview] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Supplier intelligence');
@@ -99,6 +102,50 @@ export default function ProductFactoryPage() {
     }
   };
 
+  const updateReviewDraft = (id: string, patch: Partial<ReviewDraft>, product: SavedProduct) => {
+    setReviewDrafts(current => ({
+      ...current,
+      [id]: {
+        status: current[id]?.status ?? (product.licenseStatus as ReviewDraft['status']) ?? 'pending',
+        note: current[id]?.note ?? product.licenseReviewNote ?? '',
+        evidenceUrl: current[id]?.evidenceUrl ?? product.licenseEvidenceUrl ?? '',
+        ...patch,
+      },
+    }));
+  };
+
+  const saveLicensingReview = async (item: SavedProduct) => {
+    const draft = reviewDrafts[item.id] ?? {
+      status: (item.licenseStatus as ReviewDraft['status']) || 'pending',
+      note: item.licenseReviewNote || '',
+      evidenceUrl: item.licenseEvidenceUrl || '',
+    };
+    setSavingReview(item.id);
+    setError('');
+    setNotice('');
+    try {
+      const response = await fetch(`${API}/data-bank/products/${encodeURIComponent(item.id)}/licensing-review`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify(draft),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not save source review.');
+      setSavedProducts(current => current.map(product => product.id === item.id ? {
+        ...product,
+        licenseStatus: data.review.status,
+        licenseReviewNote: data.review.note,
+        licenseEvidenceUrl: data.review.evidenceUrl || '',
+        licenseReviewedAt: data.review.reviewedAt,
+      } : product));
+      setNotice(data.message || 'Review metadata saved.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save source review.');
+    } finally {
+      setSavingReview(null);
+    }
+  };
+
   useEffect(() => { void load(); }, [load]);
 
   const toggle = (id: string) => setSelected(current => current.includes(id)
@@ -147,12 +194,41 @@ export default function ProductFactoryPage() {
 
         <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16, marginBottom: 18 }}>
           <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>Saved product drafts</h2>
+          <p style={{ color: '#fbbf24', fontSize: 12, lineHeight: 1.5 }}>A seller review is an internal checklist record only. It is not legal advice or proof of permission. Products remain DRAFT, unpriced, and RESTRICTED regardless of the review status.</p>
           {savedProducts.length === 0 ? <p style={{ color: '#94a3b8' }}>No product drafts have been created yet.</p> : (
             <div style={{ display: 'grid', gap: 8 }}>
-              {savedProducts.map(item => <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: 10, background: '#0e1828', borderRadius: 8 }}>
-                <span><strong>{item.title}</strong><span style={{ display: 'block', color: '#94a3b8', fontSize: 12 }}>{item.category} · {item.recordCount} records · {item.sourceCount} sources · {new Date(item.createdAt).toLocaleDateString()}</span></span>
-                <span style={{ color: '#fbbf24', fontSize: 12 }}>{item.status.toUpperCase()} · {item.licenseStatus.replaceAll('_', ' ')}</span>
-              </div>)}
+              {savedProducts.map(item => {
+                const draft = reviewDrafts[item.id] ?? {
+                  status: (item.licenseStatus as ReviewDraft['status']) || 'pending',
+                  note: item.licenseReviewNote || '',
+                  evidenceUrl: item.licenseEvidenceUrl || '',
+                };
+                return <div key={item.id} style={{ padding: 12, background: '#0e1828', borderRadius: 8, border: '1px solid #29384d' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                    <span><strong>{item.title}</strong><span style={{ display: 'block', color: '#94a3b8', fontSize: 12 }}>{item.category} · {item.recordCount} records · {item.sourceCount} sources · {new Date(item.createdAt).toLocaleDateString()}</span></span>
+                    <span style={{ color: '#fbbf24', fontSize: 12 }}>{item.status.toUpperCase()} · {item.licenseStatus.replaceAll('_', ' ')}</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8, marginTop: 12 }}>
+                    <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>Review status
+                      <select value={draft.status} onChange={event => updateReviewDraft(item.id, { status: event.target.value as ReviewDraft['status'] }, item)} style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }}>
+                        <option value="pending">Needs review</option>
+                        <option value="seller_reviewed">Seller reviewed (evidence supplied)</option>
+                        <option value="blocked">Do not use / blocked</option>
+                      </select>
+                    </label>
+                    <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>Source terms / evidence URL
+                      <input value={draft.evidenceUrl} onChange={event => updateReviewDraft(item.id, { evidenceUrl: event.target.value }, item)} placeholder="https://source.example/terms" style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }} />
+                    </label>
+                  </div>
+                  <label style={{ display: 'grid', gap: 4, fontSize: 12, marginTop: 8 }}>Review notes
+                    <textarea value={draft.note} onChange={event => updateReviewDraft(item.id, { note: event.target.value }, item)} minLength={10} maxLength={1000} rows={2} placeholder="Record what source terms were checked, restrictions, and any unresolved concerns." style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }} />
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+                    <button type="button" onClick={() => void saveLicensingReview(item)} disabled={savingReview === item.id || draft.note.trim().length < 10 || (draft.status === 'seller_reviewed' && !draft.evidenceUrl.trim())} style={{ padding: '8px 12px', borderRadius: 6, background: '#1d4ed8', color: 'white', border: 0 }}>{savingReview === item.id ? 'Saving…' : 'Save source review'}</button>
+                    {item.licenseReviewedAt && <span style={{ color: '#94a3b8', fontSize: 11 }}>Last saved {new Date(item.licenseReviewedAt).toLocaleString()}</span>}
+                  </div>
+                </div>;
+              })}
             </div>
           )}
         </section>
