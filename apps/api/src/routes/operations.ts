@@ -17,9 +17,6 @@ export function createOperationsRouter(prisma: PrismaClient, auth: express.Reque
 
     const now = new Date();
     const staleBefore = new Date(now.getTime() - STALE_AFTER_HOURS * 60 * 60 * 1000);
-    const dayStart = new Date(now);
-    dayStart.setUTCHours(0, 0, 0, 0);
-
     try {
       const [
         latestResearch,
