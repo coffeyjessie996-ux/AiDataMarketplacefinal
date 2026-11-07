@@ -30,6 +30,10 @@ type CreatedProduct = {
 
 export default function ProductFactoryPage() {
   const [records, setRecords] = useState<ResearchRecord[]>([]);
+  const [recordPage, setRecordPage] = useState(1);
+  const [recordPageCount, setRecordPageCount] = useState(1);
+  const [recordTotal, setRecordTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [title, setTitle] = useState('');
@@ -60,6 +64,9 @@ export default function ProductFactoryPage() {
       if (!response.ok) throw new Error(data.error || 'Could not load saved research records.');
       if (!productResponse.ok) throw new Error(productData.error || 'Could not load saved product drafts.');
       setRecords(Array.isArray(data.records) ? data.records : []);
+      setRecordPage(Number(data.page || 1));
+      setRecordPageCount(Math.max(1, Number(data.pageCount || 1)));
+      setRecordTotal(Number(data.total || 0));
       setSavedProducts(Array.isArray(productData.products) ? productData.products : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load saved research.');
@@ -67,6 +74,30 @@ export default function ProductFactoryPage() {
       setLoading(false);
     }
   }, []);
+
+  const loadMoreRecords = async () => {
+    if (loadingMore || recordPage >= recordPageCount) return;
+    setLoadingMore(true);
+    setError('');
+    try {
+      const params = new URLSearchParams({ page: String(recordPage + 1), limit: '50' });
+      const response = await fetch(`${API}/data-bank/records?${params.toString()}`, { headers: headers() });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not load more research records.');
+      const nextRecords = Array.isArray(data.records) ? data.records as ResearchRecord[] : [];
+      setRecords(current => {
+        const known = new Set(current.map(record => record.id));
+        return [...current, ...nextRecords.filter(record => !known.has(record.id))];
+      });
+      setRecordPage(Number(data.page || recordPage + 1));
+      setRecordPageCount(Math.max(1, Number(data.pageCount || recordPageCount)));
+      setRecordTotal(Number(data.total || recordTotal));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load more research records.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => { void load(); }, [load]);
 
@@ -131,7 +162,8 @@ export default function ProductFactoryPage() {
             <h2 style={{ margin: 0, fontSize: 18 }}>1. Choose source records</h2>
             <span style={{ color: '#93a4bd', fontSize: 13 }}>{selected.length} selected · maximum 50</span>
           </div>
-          <p style={{ color: '#94a3b8', fontSize: 13 }}>Only records stored in your connected Data Bank are available here. Selecting a record does not imply that its contents may legally be resold.</p>
+          <p style={{ color: '#94a3b8', fontSize: 13 }}>Only records stored in your connected Data Bank are available here. Select from the loaded records below; each draft can include up to 50 records. Selecting a record does not imply that its contents may legally be resold.</p>
+          <p style={{ color: '#93a4bd', fontSize: 12 }}>Loaded {records.length.toLocaleString()} of {recordTotal.toLocaleString()} matching records.</p>
           {loading ? <p>Loading research records…</p> : records.length === 0 ? <p style={{ color: '#94a3b8' }}>No saved records are available yet. Collect public research first, then return here.</p> : (
             <div style={{ display: 'grid', gap: 8, maxHeight: 430, overflowY: 'auto' }}>
               {records.map(record => (
@@ -146,7 +178,10 @@ export default function ProductFactoryPage() {
               ))}
             </div>
           )}
-          <button type="button" onClick={() => void load()} disabled={loading} style={{ marginTop: 12, padding: '9px 12px', borderRadius: 7, background: '#172033', border: '1px solid #334155', color: 'white' }}>Refresh records</button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+            <button type="button" onClick={() => void load()} disabled={loading || loadingMore} style={{ padding: '9px 12px', borderRadius: 7, background: '#172033', border: '1px solid #334155', color: 'white' }}>Refresh records</button>
+            {recordPage < recordPageCount && <button type="button" onClick={() => void loadMoreRecords()} disabled={loadingMore || loading} style={{ padding: '9px 12px', borderRadius: 7, background: '#1d4ed8', border: 0, color: 'white' }}>{loadingMore ? 'Loading more…' : `Load next 50 records (${recordPage}/${recordPageCount} pages)`}</button>}
+          </div>
         </section>
 
         <form onSubmit={createDraft} style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16 }}>
