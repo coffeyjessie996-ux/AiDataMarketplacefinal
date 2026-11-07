@@ -23,7 +23,6 @@ model User {
   payouts       Payout[]
   orders        Order[]
   assignedLeads Lead[]
-  demandEvents  BuyerDemandEvent[]
 }
 
 model WalletAccount {
