@@ -3,7 +3,6 @@ CREATE TABLE "Auction" (
   "id" TEXT NOT NULL,
   "datasetId" TEXT NOT NULL,
   "startingBidCents" INTEGER NOT NULL,
-  "reservePriceCents" INTEGER,
   "minimumIncrementCents" INTEGER NOT NULL DEFAULT 100,
   "currency" TEXT NOT NULL DEFAULT 'USD',
   "status" TEXT NOT NULL DEFAULT 'OPEN',
