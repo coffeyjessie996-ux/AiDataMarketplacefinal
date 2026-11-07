@@ -33,6 +33,7 @@ export default function AuctionsPage() {
   const [datasetId, setDatasetId] = useState('');
   const [startingBid, setStartingBid] = useState('25');
   const [closesAt, setClosesAt] = useState(localDateTime());
+  const [offers, setOffers] = useState<Record<string, { id: string; bidderName: string; amountCents: number; createdAt: string }[]>>({});
 
   async function loadAuctions() {
     const response = await fetch(`${API}/auctions`, { cache: 'no-store' });
@@ -93,6 +94,21 @@ export default function AuctionsPage() {
       await loadAuctions();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create auction.');
+    }
+  }
+
+  async function viewOffers(auctionId: string) {
+    setError('');
+    try {
+      const response = await fetch(`${API}/auctions/${auctionId}/bids`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not load offers.');
+      setOffers(current => ({ ...current, [auctionId]: data.bids || [] }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load offers.');
     }
   }
 
@@ -167,6 +183,14 @@ export default function AuctionsPage() {
                 <div><strong>Starting bid:</strong> {money(auction.startingBidCents)}</div>
                 <div><strong>Offers:</strong> {auction.bidCount}</div>
                 <div><strong>Closes:</strong> {new Date(auction.closesAt).toLocaleString()}</div>
+                {(['seller', 'admin'].includes(role) && token) && (
+                  <div>
+                    <button type="button" onClick={() => viewOffers(auction.id)} style={{ padding: 8, borderRadius: 8 }}>Review offers</button>
+                    {(offers[auction.id] || []).map(offer => (
+                      <p key={offer.id} style={{ fontSize: 13, margin: '6px 0' }}>{offer.bidderName}: {money(offer.amountCents)} · {new Date(offer.createdAt).toLocaleString()}</p>
+                    ))}
+                  </div>
+                )}
                 <form onSubmit={event => placeBid(event, auction)} style={{ display: 'flex', gap: 8 }}>
                   <input name="amount" required type="number" min={((auction.currentBidCents ?? auction.startingBidCents - auction.minimumIncrementCents) + auction.minimumIncrementCents) / 100} step="0.01" placeholder="Your offer ($)" style={{ minWidth: 0, flex: 1, padding: 10 }} />
                   <button type="submit" style={{ padding: '10px 14px', borderRadius: 8, border: 0 }}>Offer</button>
