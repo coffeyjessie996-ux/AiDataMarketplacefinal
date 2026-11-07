@@ -29,8 +29,8 @@ function safeErrorSummary(error: unknown): string {
 export function createAiResearchAgentRouter(prisma: PrismaClient) {
   const router = Router();
 
-  // Called by Vercel Cron every 12 hours. It is intentionally small and budget-limited:
-  // at most three new records per run (up to six per day), with no email or sales actions.
+  // Called by Vercel Cron and scheduled GitHub Actions. It is intentionally small and budget-limited:
+  // at most three new records per run, with no email or sales actions.
   router.get('/research-enrichment', async (req, res) => {
     const secret = process.env.CRON_SECRET;
     if (!secret) return res.status(503).json({ error: 'AI research agent is not configured: CRON_SECRET is missing.' });
