@@ -68,7 +68,7 @@ export function createCronRouter(prisma: PrismaClient) {
           },
           fields: [
             'Award ID', 'Recipient Name', 'Award Amount', 'Start Date', 'End Date',
-            'Awarding Agency', 'Description', 'Place of Performance State Code', 'NAICS', 'Recipient UEI',
+            'Awarding Agency', 'Description', 'Place of Performance State Code', 'NAICS', 'Recipient UEI', 'generated_internal_id',
           ],
           page: 1,
           limit: 100,
@@ -100,8 +100,14 @@ export function createCronRouter(prisma: PrismaClient) {
         const supplierName = row['Recipient Name'] ?? row.recipient_name;
         const rawAmount = row['Award Amount'] ?? row.award_amount;
         const amount = Number(rawAmount);
+        const generatedAwardId = String(row.generated_internal_id ?? '').trim();
+        const awardUrl = generatedAwardId
+          ? `https://www.usaspending.gov/award/${encodeURIComponent(generatedAwardId)}`
+          : 'https://www.usaspending.gov/search';
+
         const record = {
           awardId,
+          generatedAwardId: generatedAwardId || null,
           supplierName: supplierName ?? null,
           awardAmount: rawAmount ?? null,
           startDate: row['Start Date'] ?? row.start_date ?? null,
@@ -111,7 +117,7 @@ export function createCronRouter(prisma: PrismaClient) {
           performanceState: row['Place of Performance State Code'] ?? row.place_of_performance_state_code ?? null,
           naics: row.NAICS ?? row.naics ?? null,
           supplierUei: row['Recipient UEI'] ?? row.recipient_uei ?? null,
-          sourceUrl: 'https://www.usaspending.gov/',
+          sourceUrl: awardUrl,
           retrievedAt: retrievedAt.toISOString(),
         };
 
