@@ -1,0 +1,140 @@
+import express from 'express';
+import { z } from 'zod';
+import type { PrismaClient } from '@prisma/client';
+import type { User } from '../types';
+
+type AuthReq = express.Request & { user?: User };
+
+const createSchema = z.object({
+  datasetId: z.string().min(1),
+  startingBidCents: z.number().int().positive().max(100_000_000),
+  reservePriceCents: z.number().int().positive().max(100_000_000).optional(),
+  minimumIncrementCents: z.number().int().positive().max(10_000_000).default(100),
+  closesAt: z.string().datetime(),
+  rightsConfirmed: z.literal(true),
+}).refine((value) => !value.reservePriceCents || value.reservePriceCents >= value.startingBidCents, {
+  message: 'Reserve price must be at least the starting bid.',
+  path: ['reservePriceCents'],
+});
+
+const bidSchema = z.object({
+  amountCents: z.number().int().positive().max(100_000_000),
+});
+
+export function createAuctionsRouter(prisma: PrismaClient, auth: express.RequestHandler) {
+  const router = express.Router();
+
+  router.get('/', async (req, res) => {
+    const limitValue = Number(req.query.limit ?? 30);
+    const limit = Number.isInteger(limitValue) ? Math.max(1, Math.min(50, limitValue)) : 30;
+    try {
+      const auctions = await prisma.auction.findMany({
+        where: { status: 'OPEN', closesAt: { gt: new Date() }, dataset: { status: 'PUBLISHED', licenseType: { not: 'RESTRICTED' } } },
+        include: {
+          dataset: { select: { id: true, title: true, category: true, description: true, qualityScore: true, licenseType: true } },
+          bids: { where: { status: 'ACTIVE' }, orderBy: [{ amountCents: 'desc' }, { createdAt: 'asc' }], take: 1, select: { amountCents: true } },
+          _count: { select: { bids: true } },
+        },
+        orderBy: { closesAt: 'asc' },
+        take: limit,
+      });
+      return res.json({
+        auctions: auctions.map((auction) => ({
+          id: auction.id,
+          dataset: auction.dataset,
+          startingBidCents: auction.startingBidCents,
+          currentBidCents: auction.bids[0]?.amountCents ?? null,
+          reservePriceCents: auction.reservePriceCents,
+          minimumIncrementCents: auction.minimumIncrementCents,
+          currency: auction.currency,
+          bidCount: auction._count.bids,
+          closesAt: auction.closesAt.toISOString(),
+          createdAt: auction.createdAt.toISOString(),
+        })),
+        note: 'Bids are offers only. No order, payment, or sale is created by bidding.',
+      });
+    } catch (error) {
+      console.error('Auction listing failed', error);
+      return res.status(500).json({ error: 'Unable to load active auctions.' });
+    }
+  });
+
+  router.post('/', auth, async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    if (!['seller', 'admin'].includes(user.role)) return res.status(403).json({ error: 'A seller account is required to create an auction.' });
+
+    const parsed = createSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+    const closesAt = new Date(parsed.data.closesAt);
+    if (closesAt <= new Date() || closesAt.getTime() > Date.now() + 30 * 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: 'Auction closing time must be within the next 30 days.' });
+    }
+
+    try {
+      const dataset = await prisma.dataset.findUnique({ where: { id: parsed.data.datasetId } });
+      if (!dataset || dataset.status !== 'PUBLISHED') return res.status(404).json({ error: 'Only an existing published dataset can be auctioned.' });
+      if (dataset.licenseType === 'RESTRICTED') return res.status(400).json({ error: 'Restricted datasets cannot be auctioned.' });
+      if (user.role !== 'admin' && dataset.sellerId !== user.id) return res.status(403).json({ error: 'You can only auction your own dataset.' });
+
+      const auction = await prisma.auction.create({
+        data: {
+          datasetId: dataset.id,
+          startingBidCents: parsed.data.startingBidCents,
+          reservePriceCents: parsed.data.reservePriceCents,
+          minimumIncrementCents: parsed.data.minimumIncrementCents,
+          closesAt,
+          rightsConfirmedAt: new Date(),
+          status: 'OPEN',
+        },
+      });
+      return res.status(201).json({ auction, note: 'Auction created. Bids are non-binding offers until separately reviewed and accepted; no payment has been taken.' });
+    } catch (error) {
+      console.error('Auction creation failed', error);
+      return res.status(500).json({ error: 'Unable to create auction.' });
+    }
+  });
+
+  router.post('/:auctionId/bids', auth, async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    const parsed = bidSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const auction = await tx.auction.findUnique({
+          where: { id: req.params.auctionId },
+          include: { dataset: { select: { sellerId: true, status: true } } },
+        });
+        if (!auction || auction.status !== 'OPEN' || auction.closesAt <= new Date() || auction.dataset.status !== 'PUBLISHED') {
+          return { error: 'This auction is not open for bidding.', status: 404 as const };
+        }
+        if (auction.dataset.sellerId === user.id) return { error: 'You cannot bid on your own dataset.', status: 403 as const };
+        const highest = await tx.auctionBid.findFirst({
+          where: { auctionId: auction.id, status: 'ACTIVE' },
+          orderBy: [{ amountCents: 'desc' }, { createdAt: 'asc' }],
+        });
+        const minimum = highest
+          ? highest.amountCents + auction.minimumIncrementCents
+          : auction.startingBidCents;
+        if (parsed.data.amountCents < minimum) {
+          return { error: `Your bid must be at least $${(minimum / 100).toFixed(2)}.`, status: 400 as const };
+        }
+        const bid = await tx.auctionBid.create({
+          data: { auctionId: auction.id, bidderId: user.id, amountCents: parsed.data.amountCents },
+          select: { id: true, amountCents: true, createdAt: true },
+        });
+        return { bid };
+      }, { isolationLevel: 'Serializable' });
+
+      if ('error' in result) return res.status(result.status).json({ error: result.error });
+      return res.status(201).json({ bid: result.bid, note: 'Offer recorded only. This is not a purchase and no payment has been taken.' });
+    } catch (error) {
+      console.error('Auction bid failed', error);
+      return res.status(409).json({ error: 'The auction changed while your bid was being placed. Refresh and try again.' });
+    }
+  });
+
+  return router;
+}
