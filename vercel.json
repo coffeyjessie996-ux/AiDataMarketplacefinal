@@ -29,15 +29,15 @@
   "crons": [
     {
       "path": "/api/cron/research/federal-awards",
-      "schedule": "0 */6 * * *"
+      "schedule": "0 10 * * *"
     },
     {
       "path": "/api/cron/research/sam-opportunities",
-      "schedule": "15 */6 * * *"
+      "schedule": "30 10 * * *"
     },
     {
       "path": "/api/cron/ai/research-enrichment",
-      "schedule": "30 */12 * * *"
+      "schedule": "0 11 * * *"
     }
   ]
 }
