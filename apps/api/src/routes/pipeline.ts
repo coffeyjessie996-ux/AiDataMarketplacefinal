@@ -5,6 +5,9 @@ import type { User } from '../types';
 
 type AuthReq = express.Request & { user?: User };
 const stages = ['NEW', 'QUALIFIED', 'CONTACTED', 'PROPOSAL', 'WON', 'LOST'] as const;
+const stageCloseProbability: Record<(typeof stages)[number], number> = {
+  NEW: 5, QUALIFIED: 15, CONTACTED: 25, PROPOSAL: 50, WON: 100, LOST: 0,
+};
 
 export function createPipelineRouter(prisma: PrismaClient, auth: express.RequestHandler) {
   const router = express.Router();
@@ -22,7 +25,15 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       include: { activities: { orderBy: { createdAt: 'desc' }, take: 5 } },
       orderBy: { updatedAt: 'desc' }, take: 200,
     });
-    return res.json({ count: leads.length, leads });
+    const forecastLeads = leads.map((lead) => {
+      const expectedDealValueCents = lead.expectedDealValueCents;
+      const expectedMarginPercent = Number(lead.expectedMarginPercent);
+      const closeProbabilityPercent = stageCloseProbability[lead.stage];
+      const predictedProfitCents = expectedDealValueCents == null ? null
+        : Math.round(expectedDealValueCents * expectedMarginPercent / 100 * closeProbabilityPercent / 100);
+      return { ...lead, expectedMarginPercent, closeProbabilityPercent, predictedProfitCents };
+    });
+    return res.json({ count: forecastLeads.length, leads: forecastLeads });
   });
 
   router.post('/leads', async (req, res) => {
@@ -218,6 +229,20 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       data.stage = stage;
     }
     if (typeof req.body?.notes === 'string') data.notes = req.body.notes.slice(0, 4000);
+    if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'expectedDealValueCents')) {
+      const value = req.body.expectedDealValueCents;
+      if (value === null || value === '') data.expectedDealValueCents = null;
+      else if (!Number.isInteger(value) || value < 0 || value > 100000000000) {
+        return res.status(400).json({ error: 'Expected deal value must be a non-negative whole number of cents.' });
+      } else data.expectedDealValueCents = value;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'expectedMarginPercent')) {
+      const margin = Number(req.body.expectedMarginPercent);
+      if (!Number.isFinite(margin) || margin < 0 || margin > 100) {
+        return res.status(400).json({ error: 'Expected marketplace margin must be between 0 and 100 percent.' });
+      }
+      data.expectedMarginPercent = margin;
+    }
     if (req.body?.nextFollowUpAt === null) data.nextFollowUpAt = null;
     else if (typeof req.body?.nextFollowUpAt === 'string') {
       const date = new Date(req.body.nextFollowUpAt);

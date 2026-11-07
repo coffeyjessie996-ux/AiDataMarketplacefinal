@@ -159,6 +159,8 @@ model Lead {
   website         String?
   description     String?
   awardAmount     Decimal?     @db.Decimal(18, 2)
+  expectedDealValueCents Int?
+  expectedMarginPercent Decimal @default(20.00) @db.Decimal(5, 2)
   score           Int          @default(0)
   stage           LeadStage    @default(NEW)
   notes           String?
