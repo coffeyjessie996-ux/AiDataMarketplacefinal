@@ -1,6 +1,7 @@
 import express from 'express';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
+import { z } from 'zod';
 
 type AuthReq = express.Request & { user?: User };
 type JsonObject = Record<string, unknown>;
@@ -140,11 +141,11 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
   // Create a private, unpriced/unpublished product draft from selected saved research.
   // Source IDs remain attached to the Dataset tags so provenance can be resolved later.
   router.post('/products', async (req: AuthReq, res) => {
-    const schema = (await import('zod')).z.object({
-      recordIds: (await import('zod')).z.array((await import('zod')).z.string().min(1).max(100)).min(1).max(50),
-      title: (await import('zod')).z.string().trim().min(5).max(120),
-      category: (await import('zod')).z.string().trim().min(2).max(80),
-      description: (await import('zod')).z.string().trim().min(20).max(2000),
+    const schema = z.object({
+      recordIds: z.array(z.string().min(1).max(100)).min(1).max(50),
+      title: z.string().trim().min(5).max(120),
+      category: z.string().trim().min(2).max(80),
+      description: z.string().trim().min(20).max(2000),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Provide a title, category, description, and 1–50 saved research records.' });
