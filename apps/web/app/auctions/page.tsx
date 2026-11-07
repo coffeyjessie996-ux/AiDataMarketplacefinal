@@ -162,6 +162,10 @@ export default function AuctionsPage() {
             <label>Closes at
               <input required type="datetime-local" min={localDateTime()} value={closesAt} onChange={e => setClosesAt(e.target.value)} style={{ display: 'block', width: '100%', padding: 10, marginTop: 6 }} />
             </label>
+            <label style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <input required type="checkbox" />
+              <span>I confirm I have the legal right to license and auction this dataset and its contents.</span>
+            </label>
             <button type="submit" disabled={!datasetId} style={{ padding: 12, borderRadius: 8, border: 0, cursor: 'pointer' }}>Create auction</button>
           </form>
           <p style={{ fontSize: 12, opacity: .7 }}>You must own the dataset and confirm that you have the legal right to license its contents. Restricted datasets cannot be auctioned. Auctions close within 30 days.</p>
