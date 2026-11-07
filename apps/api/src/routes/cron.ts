@@ -197,7 +197,7 @@ export function createCronRouter(prisma: PrismaClient) {
     params.append('ptype', 'r');
 
     try {
-      const response = await fetch(`https://api.sam.gov/opportunities/v2/search?${params.toString()}`, {
+      const response = await fetch(`https://api.sam.gov/prod/opportunities/v2/search?${params.toString()}`, {
         headers: { accept: 'application/json', 'user-agent': 'AI-Data-Marketplace/1.0 (public federal opportunity research)' },
         signal: AbortSignal.timeout(20000),
       });
