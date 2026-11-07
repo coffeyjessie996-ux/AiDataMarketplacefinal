@@ -406,6 +406,52 @@ app.get('/datasets', async (req, res) => {
   }
 });
 
+
+// Public GovCon buyer inquiry capture. Contact details are stored only when a visitor
+// explicitly submits this form and confirms permission to be contacted.
+const buyerInquirySchema = z.object({
+  name: z.string().trim().min(2).max(100),
+  email: z.string().trim().email().max(254),
+  company: z.string().trim().min(2).max(160),
+  interest: z.enum(['supplier-intelligence', 'engineering-awards', 'agency-trends', 'custom-research']),
+  message: z.string().trim().max(1500).optional().default(''),
+  consent: z.literal(true),
+  website: z.string().max(0).optional().default(''),
+});
+
+app.post('/buyer-inquiries', async (req, res) => {
+  const parsed = buyerInquirySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Please complete the required fields and confirm contact permission.' });
+  if (parsed.data.website) return res.status(400).json({ error: 'Invalid submission.' });
+
+  const email = parsed.data.email.toLowerCase();
+  try {
+    const recent = await prisma.buyerDemandEvent.count({
+      where: { buyerEmail: email, status: 'NEW', createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) } },
+    });
+    if (recent >= 3) return res.status(429).json({ error: 'We have received your recent requests. Please wait before submitting again.' });
+
+    await prisma.buyerDemandEvent.create({
+      data: {
+        query: 'buyer_inquiry',
+        category: 'government-contracting',
+        resultCount: 0,
+        buyerName: parsed.data.name,
+        buyerEmail: email,
+        companyName: parsed.data.company,
+        interest: parsed.data.interest,
+        message: parsed.data.message || null,
+        status: 'NEW',
+        contactConsentAt: new Date(),
+      },
+    });
+    return res.status(201).json({ message: 'Your request has been received. Our team can follow up using the contact details you provided.' });
+  } catch (error) {
+    console.error('Buyer inquiry submission failed', error);
+    return res.status(500).json({ error: 'We could not save your request. Please try again later.' });
+  }
+});
+
 // Aggregate real marketplace search activity. Search phrases are collected without IPs,
 // contact details, account IDs, or browser fingerprints.
 app.get('/demand/summary', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
