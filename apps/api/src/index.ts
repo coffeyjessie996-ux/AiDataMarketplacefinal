@@ -491,7 +491,7 @@ app.get('/pricing/recommendations', requireAuth, requireRole(['seller', 'admin']
 
     const tokenize = (value: string) => value.toLowerCase()
       .replace(/[^a-z0-9]+/g, ' ')
-      .split(/\\s+/)
+      .split(/\s+/)
       .filter((word) => word.length > 2 && !['the', 'and', 'for', 'with', 'from', 'data'].includes(word));
     const median = (values: number[]) => {
       if (!values.length) return null;
