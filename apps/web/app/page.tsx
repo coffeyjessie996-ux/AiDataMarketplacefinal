@@ -30,7 +30,8 @@ export default function HomePage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
-  const [dataError, setDataError] = useState<string | null>(null);\n  const [searchTerm, setSearchTerm] = useState('');
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
