@@ -85,6 +85,61 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       note: 'Score is an award-size prioritization hint only, not supplier verification or predicted conversion.' });
   });
 
+  // AI sales assistant: create an evidence-based outreach draft for human review.
+  // It never sends email or changes a lead's stage automatically.
+  router.post('/leads/:id/ai-draft', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: 'AI sales assistant is not configured. Add OPENAI_API_KEY to the API environment.' });
+
+    const lead = await prisma.lead.findFirst({
+      where: { id: req.params.id, ...(user.role === 'admin' ? {} : { ownerId: user.id }) },
+    });
+    if (!lead) return res.status(404).json({ error: 'Lead not found.' });
+
+    const taskId = randomUUID();
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(20000),
+        body: JSON.stringify({
+          model: process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini',
+          temperature: 0.3,
+          max_tokens: 550,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: 'You are an ethical B2B sales enablement assistant. Use only supplied facts. Never invent a contact, email, relationship, product capability, buyer intent, or claim. If there is no verified contact email, explicitly say the draft must not be sent until a contact is independently verified. Return JSON with subject, emailBody, rationale, missingInformation, suggestedNextStep. Write concise, relevant, non-deceptive outreach. Do not claim an existing relationship.' },
+            { role: 'user', content: JSON.stringify({ companyName: lead.companyName, contactName: lead.contactName, verifiedEmail: lead.email, website: lead.website, source: lead.source, publicRecordDescription: lead.description, awardAmount: lead.awardAmount?.toString() ?? null, currentStage: lead.stage, operatorNotes: lead.notes }) },
+          ],
+        }),
+      });
+      if (!response.ok) throw new Error(`OpenAI returned HTTP ${response.status}.`);
+      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const raw = payload.choices?.[0]?.message?.content;
+      if (!raw) throw new Error('AI returned an empty draft.');
+      const draft = JSON.parse(raw) as Record<string, unknown>;
+      const subject = typeof draft.subject === 'string' ? draft.subject.slice(0, 180) : '';
+      const emailBody = typeof draft.emailBody === 'string' ? draft.emailBody.slice(0, 5000) : '';
+      if (!subject || !emailBody) throw new Error('AI returned an incomplete draft.');
+      const safeDraft = {
+        subject, emailBody,
+        rationale: typeof draft.rationale === 'string' ? draft.rationale.slice(0, 700) : '',
+        missingInformation: Array.isArray(draft.missingInformation) ? draft.missingInformation.filter((v): v is string => typeof v === 'string').slice(0, 8) : [],
+        suggestedNextStep: typeof draft.suggestedNextStep === 'string' ? draft.suggestedNextStep.slice(0, 400) : 'Verify a relevant contact before sending.',
+        requiresHumanReview: true,
+        sendStatus: 'DRAFT_ONLY',
+      };
+      await prisma.leadActivity.create({
+        data: { leadId: lead.id, type: 'ai_outreach_draft', description: JSON.stringify(safeDraft) },
+      });
+      return res.json({ leadId: lead.id, draft: safeDraft });
+    } catch (error) {
+      console.error('AI sales draft failed', error);
+      return res.status(502).json({ error: 'Unable to generate an outreach draft. No message was sent.' });
+    }
+  });
+
   router.patch('/leads/:id', async (req, res) => {
     const user = (req as AuthReq).user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
