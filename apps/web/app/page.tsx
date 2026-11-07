@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -31,6 +31,7 @@ export default function HomePage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -63,7 +64,25 @@ export default function HomePage() {
     fetchData();
   }, []);
 
-  const formatMoney = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  const searchMarketplace = async (event: FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (searchTerm.trim()) params.set('q', searchTerm.trim());
+      const response = await fetch(`${API}/datasets?${params.toString()}`, { cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Marketplace search is unavailable.');
+      setDatasets(data.datasets || []);
+      setDataError(null);
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : 'Marketplace search is unavailable.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatMoney = (cents: number) => `${(cents / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 
   return (
     <main className="page-shell">
@@ -148,6 +167,18 @@ export default function HomePage() {
           </div>
           <a href="/dashboard" className="secondary-button">Seller dashboard</a>
         </div>
+
+        <form onSubmit={searchMarketplace} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '18px 0' }}>
+          <input
+            aria-label="Search datasets"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Search supplier intelligence, industries, or datasets..."
+            style={{ flex: '1 1 260px', minWidth: 0, padding: '13px 15px', borderRadius: 8, border: '1px solid #334155', background: '#0f172a', color: '#f8fafc' }}
+          />
+          <button type="submit" className="primary-button" disabled={loading}>Search marketplace</button>
+        </form>
+        <p style={{ color: '#94a3b8', fontSize: 12 }}>Searches are counted in aggregate to help sellers understand real marketplace demand. We do not store IP addresses or contact details with search terms.</p>
 
         {loading ? (
           <p className="empty-state">Loading marketplace...</p>
