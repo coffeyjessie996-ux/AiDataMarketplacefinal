@@ -23,6 +23,7 @@ model User {
   payouts       Payout[]
   orders        Order[]
   assignedLeads Lead[]
+  auctionBids  AuctionBid[]
 }
 
 model WalletAccount {
@@ -54,6 +55,7 @@ model Dataset {
   updatedAt    DateTime @updatedAt
   listings     Listing[]
   orders       Order[]
+  auctions     Auction[]
 }
 
 model Listing {
@@ -261,4 +263,38 @@ enum PayoutStatus {
   APPROVED
   COMPLETED
   REJECTED
+}
+
+
+model Auction {
+  id                 String       @id @default(cuid())
+  datasetId          String
+  dataset            Dataset      @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  startingBidCents   Int
+  reservePriceCents  Int?
+  minimumIncrementCents Int      @default(100)
+  currency           String       @default("USD")
+  status             String       @default("OPEN")
+  rightsConfirmedAt  DateTime
+  closesAt           DateTime
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  bids               AuctionBid[]
+
+  @@index([status, closesAt])
+  @@index([datasetId, createdAt])
+}
+
+model AuctionBid {
+  id          String   @id @default(cuid())
+  auctionId   String
+  auction     Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  bidderId    String
+  bidder      User     @relation(fields: [bidderId], references: [id], onDelete: Cascade)
+  amountCents Int
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+
+  @@index([auctionId, amountCents])
+  @@index([bidderId, createdAt])
 }
