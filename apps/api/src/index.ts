@@ -458,7 +458,7 @@ app.get('/pricing/recommendations', requireAuth, requireRole(['seller', 'admin']
   const isAdmin = user.role === 'admin';
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   try {
-    const [datasets, demandEvents] = await Promise.all([
+    const [datasets, competitorDatasets, demandEvents] = await Promise.all([
       prisma.dataset.findMany({
         where: {
           AND: [
@@ -474,6 +474,12 @@ app.get('/pricing/recommendations', requireAuth, requireRole(['seller', 'admin']
         },
         orderBy: { createdAt: 'desc' },
         take: 200,
+      }),
+      prisma.dataset.findMany({
+        where: { AND: [{ status: 'PUBLISHED' }, nonDemoDatasetFilter] },
+        select: { id: true, sellerId: true, category: true, priceCents: true },
+        orderBy: { createdAt: 'desc' },
+        take: 1000,
       }),
       prisma.buyerDemandEvent.findMany({
         where: { createdAt: { gte: since } },
@@ -495,7 +501,7 @@ app.get('/pricing/recommendations', requireAuth, requireRole(['seller', 'admin']
     };
 
     const recommendations = datasets.map((dataset) => {
-      const comparablePrices = datasets
+      const comparablePrices = competitorDatasets
         .filter((candidate) =>
           candidate.id !== dataset.id &&
           candidate.sellerId !== dataset.sellerId &&
