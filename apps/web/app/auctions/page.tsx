@@ -146,7 +146,7 @@ export default function AuctionsPage() {
       {notice && <p role="status" style={{ padding: 12, border: '1px solid #16a34a', borderRadius: 8 }}>{notice}</p>}
       {error && <p role="alert" style={{ padding: 12, border: '1px solid #dc2626', borderRadius: 8 }}>{error}</p>}
 
-      {['seller', 'admin'].includes(role) && token && (
+      {['SELLER', 'ADMIN'].includes(role) && token && (
         <section style={{ padding: 20, border: '1px solid #475569', borderRadius: 12, marginBottom: 28 }}>
           <h2 style={{ fontSize: 22, marginTop: 0 }}>List a dataset for bids</h2>
           <form onSubmit={createAuction} style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', alignItems: 'end' }}>
@@ -180,14 +180,14 @@ export default function AuctionsPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
             {auctions.map(auction => (
               <article key={auction.id} style={{ padding: 18, border: '1px solid #475569', borderRadius: 12, display: 'grid', gap: 10 }}>
-                <span style={{ fontSize: 12, opacity: .7 }}>{auction.dataset.category} · Quality completeness {auction.dataset.qualityScore}/100</span>
+                <span style={{ fontSize: 12, opacity: .7 }}>{auction.dataset.category} · Quality score {auction.dataset.qualityScore}/100</span>
                 <h3 style={{ fontSize: 19, margin: 0 }}>{auction.dataset.title}</h3>
                 <p style={{ opacity: .8, margin: 0 }}>{auction.dataset.description}</p>
                 <div><strong>Current offer:</strong> {money(auction.currentBidCents)}</div>
                 <div><strong>Starting bid:</strong> {money(auction.startingBidCents)}</div>
                 <div><strong>Offers:</strong> {auction.bidCount}</div>
                 <div><strong>Closes:</strong> {new Date(auction.closesAt).toLocaleString()}</div>
-                {(['seller', 'admin'].includes(role) && token) && (
+                {(['SELLER', 'ADMIN'].includes(role) && token) && (
                   <div>
                     <button type="button" onClick={() => viewOffers(auction.id)} style={{ padding: 8, borderRadius: 8 }}>Review offers</button>
                     {(offers[auction.id] || []).map(offer => (
