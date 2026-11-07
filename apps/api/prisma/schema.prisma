@@ -102,6 +102,13 @@ model BuyerDemandEvent {
   query       String
   category    String?
   resultCount Int      @default(0)
+  buyerName   String?
+  buyerEmail  String?
+  companyName String?
+  interest    String?
+  message     String?
+  status      String   @default("SEARCH")
+  contactConsentAt DateTime?
   createdAt   DateTime @default(now())
 
   @@index([createdAt])
