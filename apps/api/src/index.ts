@@ -406,16 +406,97 @@ app.get('/datasets', async (req, res) => {
   }
 });
 
+
+// Public GovCon buyer inquiry capture. Contact details are stored only when a visitor
+// explicitly submits this form and confirms permission to be contacted.
+const buyerInquirySchema = z.object({
+  name: z.string().trim().min(2).max(100),
+  email: z.string().trim().email().max(254),
+  company: z.string().trim().min(2).max(160),
+  interest: z.enum(['supplier-intelligence', 'engineering-awards', 'agency-trends', 'custom-research']),
+  message: z.string().trim().max(1500).optional().default(''),
+  consent: z.literal(true),
+  website: z.string().max(0).optional().default(''),
+});
+
+app.post('/buyer-inquiries', async (req, res) => {
+  const parsed = buyerInquirySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Please complete the required fields and confirm contact permission.' });
+  if (parsed.data.website) return res.status(400).json({ error: 'Invalid submission.' });
+
+  const email = parsed.data.email.toLowerCase();
+  try {
+    const recent = await prisma.buyerDemandEvent.count({
+      where: { buyerEmail: email, status: 'NEW', createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) } },
+    });
+    if (recent >= 3) return res.status(429).json({ error: 'We have received your recent requests. Please wait before submitting again.' });
+
+    await prisma.buyerDemandEvent.create({
+      data: {
+        query: 'buyer_inquiry',
+        category: 'government-contracting',
+        resultCount: 0,
+        buyerName: parsed.data.name,
+        buyerEmail: email,
+        companyName: parsed.data.company,
+        interest: parsed.data.interest,
+        message: parsed.data.message || null,
+        status: 'NEW',
+        contactConsentAt: new Date(),
+      },
+    });
+    return res.status(201).json({ message: 'Your request has been received. Our team can follow up using the contact details you provided.' });
+  } catch (error) {
+    console.error('Buyer inquiry submission failed', error);
+    return res.status(500).json({ error: 'We could not save your request. Please try again later.' });
+  }
+});
+
+
+app.get('/buyer-inquiries', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
+  try {
+    const inquiries = await prisma.buyerDemandEvent.findMany({
+      where: { status: { in: ['NEW', 'CONTACTED', 'CLOSED'] }, buyerEmail: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: {
+        id: true, buyerName: true, buyerEmail: true, companyName: true,
+        interest: true, message: true, status: true, createdAt: true,
+      },
+    });
+    return res.json({ inquiries });
+  } catch (error) {
+    console.error('Buyer inquiry inbox failed', error);
+    return res.status(500).json({ error: 'Unable to load buyer inquiries.' });
+  }
+});
+
+app.patch('/buyer-inquiries/:id', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
+  const parsed = z.object({ status: z.enum(['NEW', 'CONTACTED', 'CLOSED']) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Choose a valid inquiry status.' });
+  try {
+    const result = await prisma.buyerDemandEvent.updateMany({
+      where: { id: String(req.params.id), buyerEmail: { not: null }, status: { in: ['NEW', 'CONTACTED', 'CLOSED'] } },
+      data: { status: parsed.data.status },
+    });
+    if (!result.count) return res.status(404).json({ error: 'Buyer inquiry not found.' });
+    return res.json({ status: parsed.data.status });
+  } catch (error) {
+    console.error('Buyer inquiry update failed', error);
+    return res.status(500).json({ error: 'Unable to update buyer inquiry.' });
+  }
+});
+
 // Aggregate real marketplace search activity. Search phrases are collected without IPs,
 // contact details, account IDs, or browser fingerprints.
 app.get('/demand/summary', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
   try {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const [totalSearches, topQueries, categoryDemand, zeroResultSearches] = await Promise.all([
-      prisma.buyerDemandEvent.count({ where: { createdAt: { gte: since } } }),
+      prisma.buyerDemandEvent.count({ where: { status: 'SEARCH', createdAt: { gte: since } } }),
       prisma.buyerDemandEvent.groupBy({
         by: ['query'],
-        where: { createdAt: { gte: since } },
+        where: { status: 'SEARCH', createdAt: { gte: since } },
         _count: { _all: true },
         _avg: { resultCount: true },
         orderBy: { _count: { query: 'desc' } },
@@ -423,12 +504,12 @@ app.get('/demand/summary', requireAuth, requireRole(['seller', 'admin']), async 
       }),
       prisma.buyerDemandEvent.groupBy({
         by: ['category'],
-        where: { createdAt: { gte: since }, category: { not: null } },
+        where: { status: 'SEARCH', createdAt: { gte: since }, category: { not: null } },
         _count: { _all: true },
         orderBy: { _count: { category: 'desc' } },
         take: 8,
       }),
-      prisma.buyerDemandEvent.count({ where: { createdAt: { gte: since }, resultCount: 0 } }),
+      prisma.buyerDemandEvent.count({ where: { status: 'SEARCH', createdAt: { gte: since }, resultCount: 0 } }),
     ]);
 
     return res.json({
@@ -486,7 +567,7 @@ app.get('/pricing/recommendations', requireAuth, requireRole(['seller', 'admin']
         take: 1000,
       }),
       prisma.buyerDemandEvent.findMany({
-        where: { createdAt: { gte: since } },
+        where: { status: 'SEARCH', createdAt: { gte: since } },
         select: { query: true, resultCount: true },
         orderBy: { createdAt: 'desc' },
         take: 2000,

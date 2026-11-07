@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import BuyerInquiryForm from './buyer-inquiry-form';
 
 export const metadata: Metadata = {
   title: 'Supplier Intelligence for Business Buyers | AI Data Marketplace',
@@ -109,6 +110,8 @@ export default function ForBusinessesPage() {
           ))}
         </div>
       </section>
+
+      <BuyerInquiryForm />
 
       <section style={{ marginTop: 58, padding: '28px clamp(20px, 4vw, 42px)', border: '1px solid rgba(20,184,166,.25)', borderRadius: 16, background: 'rgba(13,148,136,.08)' }}>
         <h2 style={{ color: '#fff', margin: '0 0 12px', fontSize: 'clamp(1.5rem, 3vw, 2rem)' }}>Check the catalog before making a decision.</h2>
