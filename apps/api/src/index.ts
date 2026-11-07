@@ -358,9 +358,9 @@ app.get('/users', requireAuth, requireRole(['admin']), async (_req, res) => {
 
 app.get('/datasets', async (req, res) => {
   const rawQuery = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
-  const normalizedQuery = rawQuery.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/gi, '[email]')
-    .replace(/\\+?\\d[\\d ()-]{7,}\\d/g, '[phone]')
-    .replace(/\\s+/g, ' ').toLowerCase().slice(0, 80);
+  const normalizedQuery = rawQuery.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email]')
+    .replace(/\+?\d[\d ()-]{7,}\d/g, '[phone]')
+    .replace(/\s+/g, ' ').toLowerCase().slice(0, 80);
   const where: any = {
     AND: [
       { status: 'PUBLISHED' },
