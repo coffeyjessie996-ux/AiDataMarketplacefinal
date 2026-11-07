@@ -17,6 +17,15 @@ function asObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function safeErrorSummary(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[redacted]')
+    .replace(/(api[_-]?key["'\s:=]+)[^\s,"']+/gi, '$1[redacted]')
+    .slice(0, 220);
+}
+
 export function createAiResearchAgentRouter(prisma: PrismaClient) {
   const router = Router();
 
@@ -38,6 +47,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
     let processed = 0;
     let saved = 0;
     let failed = 0;
+    const failureDetails: string[] = [];
     try {
       const candidates = await prisma.supplierResearchRecord.findMany({
         orderBy: [{ retrievedAt: 'desc' }],
@@ -87,14 +97,16 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
           saved += 1;
         } catch (error) {
           failed += 1;
-          console.error('AI research analysis failed for record', record.id, error);
+          const detail = safeErrorSummary(error);
+          if (failureDetails.length < 3) failureDetails.push(detail);
+          console.error('AI research analysis failed for record', record.id, detail);
         }
       }
 
       const status = processed > 0 && failed === processed ? 'FAILED' : 'COMPLETED';
       await finishAgentTask(prisma, taskId, status, {
         message: pending.length
-          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. Maximum three records are processed per daily run.`
+          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum three records are processed per daily run.`
           : 'AI research run checked the latest 30 records; no unanalyzed records were found.',
         recordsFetched: processed,
         recordsSaved: saved,
@@ -111,7 +123,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       });
     } catch (error) {
       await finishAgentTask(prisma, taskId, 'FAILED', {
-        message: 'AI research agent failed while loading or processing Data Bank records.',
+        message: `AI research agent failed while loading or processing Data Bank records: ${safeErrorSummary(error)}`,
         recordsFetched: processed,
         recordsSaved: saved,
         recordsFailed: failed + 1,
