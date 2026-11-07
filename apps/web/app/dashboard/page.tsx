@@ -141,6 +141,7 @@ export default function DashboardPage() {
           <a className="nav-item" href="/">🛍️ Browse marketplace</a>
           <a className="nav-item" href="/suppliers">🔎 Supplier research</a>
           <a className="nav-item" href="/data-bank">🗄️ AI Data Bank</a>
+          <a className="nav-item" href="/product-factory">🏭 Data Product Factory</a>
           <a className="nav-item" href="/agents">🤖 Agent activity feed</a>
           <a className="nav-item" href="/pipeline">📈 Lead &amp; sales pipeline</a>
           {user?.role === 'admin' && <a className="nav-item" href="/operations">🩺 Operations health</a>}

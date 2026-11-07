@@ -1,6 +1,7 @@
 import express from 'express';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
+import { z } from 'zod';
 
 type AuthReq = express.Request & { user?: User };
 type JsonObject = Record<string, unknown>;
@@ -133,6 +134,165 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
     } catch (error) {
       console.error('Data Bank records query failed', error);
       return res.status(500).json({ error: 'Unable to search Data Bank records.' });
+    }
+  });
+
+
+
+  router.get('/products', async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    try {
+      const products = await prisma.dataset.findMany({
+        where: { sellerId: user.id, tags: { has: 'factory:v1' } },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+          id: true, title: true, category: true, qualityScore: true,
+          sourceCount: true, status: true, licenseType: true, createdAt: true,
+          tags: true,
+        },
+      });
+      return res.json({
+        products: products.map((product) => ({
+          id: product.id, title: product.title, category: product.category,
+          qualityScore: product.qualityScore, sourceCount: product.sourceCount,
+          recordCount: product.tags.filter((tag) => tag.startsWith('source-record-id:')).length,
+          status: product.status.toLowerCase(), licenseStatus: product.licenseType === 'RESTRICTED' ? 'review_required' : 'unknown',
+          createdAt: product.createdAt,
+        })),
+      });
+    } catch (error) {
+      console.error('Product Factory list failed', error);
+      return res.status(500).json({ error: 'Unable to load product drafts.' });
+    }
+  });
+
+  // Create a private, unpriced/unpublished product draft from selected saved research.
+  // Source IDs remain attached to the Dataset tags so provenance can be resolved later.
+  router.post('/products', async (req: AuthReq, res) => {
+    const schema = z.object({
+      recordIds: z.array(z.string().min(1).max(100)).min(1).max(50),
+      title: z.string().trim().min(5).max(120),
+      category: z.string().trim().min(2).max(80),
+      description: z.string().trim().min(20).max(2000),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Provide a title, category, description, and 1–50 saved research records.' });
+    const user = req.user;
+    if (!user || !['seller', 'admin'].includes(user.role)) {
+      return res.status(403).json({ error: 'A seller or admin account is required to create product drafts.' });
+    }
+
+    try {
+      const uniqueIds = [...new Set(parsed.data.recordIds)];
+      const records = await prisma.supplierResearchRecord.findMany({
+        where: { id: { in: uniqueIds } },
+        orderBy: { retrievedAt: 'desc' },
+      });
+      if (records.length !== uniqueIds.length) {
+        return res.status(400).json({ error: 'One or more selected research records no longer exist. Refresh the Data Bank and try again.' });
+      }
+
+      const populatedFields = records.map((record) => {
+        const payload = asObject(record.payload);
+        return [
+          record.supplierName, record.sourceRecordId, record.sourceUrl,
+          payload.title, payload.description, payload.awardAmount, payload.awardingAgency,
+          payload.naics, payload.supplierUei, payload.startDate, payload.endDate,
+        ].filter(hasValue).length;
+      });
+      const fieldCompleteness = populatedFields.reduce((sum, count) => sum + Math.min(count / 11, 1), 0) / records.length;
+      const sourceLinkRate = records.filter((record) => Boolean(record.sourceUrl)).length / records.length;
+      const supplierNameRate = records.filter((record) => Boolean(record.supplierName?.trim())).length / records.length;
+      const qualityScore = Math.round((fieldCompleteness * 60) + (sourceLinkRate * 20) + (supplierNameRate * 20));
+      const sourceNames = [...new Set(records.map((record) => record.source))];
+      const provenanceTags = [
+        'factory:v1',
+        'license:review-required',
+        ...sourceNames.map((source) => `source:${source.slice(0, 80)}`),
+        ...records.map((record) => `source-record-id:${record.id}`),
+      ];
+
+      const dataset = await prisma.dataset.create({
+        data: {
+          sellerId: user.id,
+          title: parsed.data.title,
+          category: parsed.data.category,
+          description: parsed.data.description,
+          priceCents: 0,
+          qualityScore,
+          licenseType: 'RESTRICTED',
+          sourceCount: sourceNames.length,
+          status: 'DRAFT',
+          tags: provenanceTags,
+        },
+      });
+
+      return res.status(201).json({
+        product: {
+          id: dataset.id,
+          title: dataset.title,
+          category: dataset.category,
+          status: 'draft',
+          priceCents: 0,
+          qualityScore,
+          quality: {
+            recordCount: records.length,
+            distinctSourceCount: sourceNames.length,
+            sourceLinkRate: Math.round(sourceLinkRate * 100),
+            supplierNameRate: Math.round(supplierNameRate * 100),
+            fieldCompleteness: Math.round(fieldCompleteness * 100),
+          },
+          licensing: {
+            status: 'review_required',
+            note: 'This draft is restricted and unpublished until source terms, redistribution rights, and applicable privacy requirements are reviewed.',
+          },
+          provenance: records.map((record) => ({
+            recordId: record.id,
+            source: record.source,
+            sourceRecordId: record.sourceRecordId,
+            sourceUrl: record.sourceUrl,
+            retrievedAt: record.retrievedAt,
+          })),
+        },
+      });
+    } catch (error) {
+      console.error('Product Factory draft creation failed', error);
+      return res.status(500).json({ error: 'Unable to create product draft.' });
+    }
+  });
+
+  // Only the owning seller/admin can inspect the source records included in a draft.
+  router.get('/products/:id/records', async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    try {
+      const productId = String(req.params.id);
+      const product = await prisma.dataset.findFirst({
+        where: { id: productId, sellerId: user.id, tags: { has: 'factory:v1' } },
+        select: { id: true, title: true, tags: true, qualityScore: true, status: true, licenseType: true },
+      });
+      if (!product) return res.status(404).json({ error: 'Product draft not found.' });
+      const recordIds = product.tags
+        .filter((tag) => tag.startsWith('source-record-id:'))
+        .map((tag) => tag.slice('source-record-id:'.length));
+      const records = await prisma.supplierResearchRecord.findMany({
+        where: { id: { in: recordIds } },
+        orderBy: { retrievedAt: 'desc' },
+      });
+      return res.json({
+        product: { id: product.id, title: product.title, qualityScore: product.qualityScore, status: product.status.toLowerCase(), licenseType: product.licenseType.toLowerCase() },
+        records: records.map((record) => ({
+          id: record.id, source: record.source, sourceRecordId: record.sourceRecordId,
+          supplierName: record.supplierName, sourceUrl: record.sourceUrl,
+          payload: record.payload, retrievedAt: record.retrievedAt,
+        })),
+        note: 'Source records are returned with their original source links and retrieval timestamps. This draft is not published or cleared for redistribution.',
+      });
+    } catch (error) {
+      console.error('Product Factory provenance lookup failed', error);
+      return res.status(500).json({ error: 'Unable to load product provenance.' });
     }
   });
 
