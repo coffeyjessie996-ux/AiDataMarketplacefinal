@@ -34,7 +34,8 @@ export default function PipelinePage() {
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<SalesDraft | null>(null);
   const [draftLead, setDraftLead] = useState('');
-  const [draftBusy, setDraftBusy] = useState('');\n  const [closePlan, setClosePlan] = useState<ClosePlan | null>(null);
+  const [draftBusy, setDraftBusy] = useState('');
+  const [closePlan, setClosePlan] = useState<ClosePlan | null>(null);
   const [closePlanLead, setClosePlanLead] = useState('');
   const [closeBusy, setCloseBusy] = useState('');
 
