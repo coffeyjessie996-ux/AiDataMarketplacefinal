@@ -360,12 +360,200 @@ app.get('/users', requireAuth, requireRole(['admin']), async (_req, res) => {
   return res.json({ users: users.map((user) => serializeUser(user)) });
 });
 
-app.get('/datasets', async (_req, res) => {
-  const datasets = await prisma.dataset.findMany({
-    where: { AND: [{ status: 'PUBLISHED' }, nonDemoDatasetFilter] },
-    orderBy: { createdAt: 'desc' },
-  });
-  return res.json({ datasets: datasets.map(serializeDataset) });
+app.get('/datasets', async (req, res) => {
+  const rawQuery = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+  const normalizedQuery = rawQuery.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email]')
+    .replace(/\+?\d[\d ()-]{7,}\d/g, '[phone]')
+    .replace(/\s+/g, ' ').toLowerCase().slice(0, 80);
+  const where: any = {
+    AND: [
+      { status: 'PUBLISHED' },
+      nonDemoDatasetFilter,
+      ...(rawQuery.length >= 2 ? [{
+        OR: [
+          { title: { contains: rawQuery, mode: 'insensitive' } },
+          { category: { contains: rawQuery, mode: 'insensitive' } },
+          { description: { contains: rawQuery, mode: 'insensitive' } },
+          { tags: { has: rawQuery.toLowerCase() } },
+        ],
+      }] : []),
+    ],
+  };
+
+  try {
+    const datasets = await prisma.dataset.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    if (normalizedQuery.length >= 2) {
+      // Store search intent only: no IP address, email, account ID, or browser fingerprint.
+      await prisma.buyerDemandEvent.create({
+        data: {
+          query: normalizedQuery,
+          category: datasets.find((dataset) => dataset.category.toLowerCase() === normalizedQuery)?.category ?? null,
+          resultCount: datasets.length,
+        },
+      });
+    }
+    return res.json({
+      datasets: datasets.map(serializeDataset),
+      search: rawQuery.length >= 2 ? { query: normalizedQuery, resultCount: datasets.length, tracked: normalizedQuery.length >= 2 } : null,
+    });
+  } catch (error) {
+    console.error('Marketplace dataset search failed', error);
+    return res.status(500).json({ error: 'Unable to search marketplace datasets.' });
+  }
+});
+
+// Aggregate real marketplace search activity. Search phrases are collected without IPs,
+// contact details, account IDs, or browser fingerprints.
+app.get('/demand/summary', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
+  try {
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [totalSearches, topQueries, categoryDemand, zeroResultSearches] = await Promise.all([
+      prisma.buyerDemandEvent.count({ where: { createdAt: { gte: since } } }),
+      prisma.buyerDemandEvent.groupBy({
+        by: ['query'],
+        where: { createdAt: { gte: since } },
+        _count: { _all: true },
+        _avg: { resultCount: true },
+        orderBy: { _count: { query: 'desc' } },
+        take: 10,
+      }),
+      prisma.buyerDemandEvent.groupBy({
+        by: ['category'],
+        where: { createdAt: { gte: since }, category: { not: null } },
+        _count: { _all: true },
+        orderBy: { _count: { category: 'desc' } },
+        take: 8,
+      }),
+      prisma.buyerDemandEvent.count({ where: { createdAt: { gte: since }, resultCount: 0 } }),
+    ]);
+
+    return res.json({
+      source: 'recorded_marketplace_searches',
+      windowDays: 30,
+      totalSearches,
+      zeroResultSearches,
+      topQueries: topQueries.map((item) => ({
+        query: item.query,
+        searches: item._count._all,
+        averageResults: Math.round(item._avg.resultCount ?? 0),
+      })),
+      categoryDemand: categoryDemand.map((item) => ({
+        category: item.category,
+        searches: item._count._all,
+      })),
+      note: 'These are actual search events recorded by the marketplace, not estimated market size, purchase intent, or sales.',
+    });
+  } catch (error) {
+    console.error('Buyer demand summary failed', error);
+    return res.status(500).json({ error: 'Unable to load buyer demand intelligence.' });
+  }
+});
+
+// Pricing guidance uses current published competitor listings and recorded marketplace searches.
+// It is advisory only: it never changes a dataset price or publishes a listing.
+app.get('/pricing/recommendations', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+
+  const isAdmin = user.role === 'admin';
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  try {
+    const [datasets, competitorDatasets, demandEvents] = await Promise.all([
+      prisma.dataset.findMany({
+        where: {
+          AND: [
+            isAdmin ? { status: 'PUBLISHED' } : { sellerId: user.id, status: 'PUBLISHED' },
+            nonDemoDatasetFilter,
+          ],
+        },
+        include: {
+          orders: {
+            where: { status: 'PAID' },
+            select: { totalCents: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+      prisma.dataset.findMany({
+        where: { AND: [{ status: 'PUBLISHED' }, nonDemoDatasetFilter] },
+        select: { id: true, sellerId: true, category: true, priceCents: true },
+        orderBy: { createdAt: 'desc' },
+        take: 1000,
+      }),
+      prisma.buyerDemandEvent.findMany({
+        where: { createdAt: { gte: since } },
+        select: { query: true, resultCount: true },
+        orderBy: { createdAt: 'desc' },
+        take: 2000,
+      }),
+    ]);
+
+    const tokenize = (value: string) => value.toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(/\s+/)
+      .filter((word) => word.length > 2 && !['the', 'and', 'for', 'with', 'from', 'data'].includes(word));
+    const median = (values: number[]) => {
+      if (!values.length) return null;
+      const sorted = [...values].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
+    };
+
+    const recommendations = datasets.map((dataset) => {
+      const comparablePrices = competitorDatasets
+        .filter((candidate) =>
+          candidate.id !== dataset.id &&
+          candidate.sellerId !== dataset.sellerId &&
+          candidate.category.trim().toLowerCase() === dataset.category.trim().toLowerCase(),
+        )
+        .map((candidate) => candidate.priceCents)
+        .filter((price) => Number.isInteger(price) && price > 0);
+      const benchmarkMedianCents = median(comparablePrices);
+      const qualityAdjustmentPercent = Math.max(-10, Math.min(10, Math.round((dataset.qualityScore - 70) * 0.2)));
+      const suggestedPriceCents = benchmarkMedianCents === null
+        ? null
+        : Math.max(100, Math.round(benchmarkMedianCents * (1 + qualityAdjustmentPercent / 100)));
+      const productTerms = new Set(tokenize(dataset.title + ' ' + dataset.category));
+      const demandSearches = demandEvents.filter((event) =>
+        tokenize(event.query).some((term) => productTerms.has(term)),
+      ).length;
+      const paidOrderValueCents = dataset.orders.reduce((total, order) => total + order.totalCents, 0);
+
+      return {
+        datasetId: dataset.id,
+        title: dataset.title,
+        category: dataset.category,
+        currentPriceCents: dataset.priceCents,
+        qualityScore: dataset.qualityScore,
+        benchmarkMedianCents,
+        suggestedPriceCents,
+        qualityAdjustmentPercent,
+        comparableListings: comparablePrices.length,
+        demandSearchesLast30Days: demandSearches,
+        paidOrdersRecorded: dataset.orders.length,
+        paidOrderValueCents,
+        confidence: comparablePrices.length >= 5 ? 'high' : comparablePrices.length >= 3 ? 'medium' : 'low',
+        note: suggestedPriceCents === null
+          ? 'Not enough published competitor listings in this category to calculate a responsible price benchmark.'
+          : 'Suggestion is based on the median price of other sellers’ published listings in the same category, adjusted modestly for the stored quality score.',
+      };
+    });
+
+    return res.json({
+      source: 'published_marketplace_listings_and_recorded_searches',
+      windowDays: 30,
+      recommendations,
+      note: 'Search counts are interest signals, not purchase intent. Paid-order counts reflect database records marked PAID and are not payment-provider settlement verification. Suggestions never change prices automatically.',
+    });
+  } catch (error) {
+    console.error('Pricing recommendations failed', error);
+    return res.status(500).json({ error: 'Unable to calculate pricing recommendations from marketplace data.' });
+  }
 });
 
 app.get('/datasets/:id', async (req, res) => {
