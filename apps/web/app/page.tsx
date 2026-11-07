@@ -72,6 +72,7 @@ export default function HomePage() {
           <div className="brand">AIDATA</div>
           <div className="nav-links">
             <a href="#catalog">Catalog</a>
+            <a href="/auctions">Data auctions</a>
             <a href="#automation">Automation</a>
             <a href="#money">Revenue</a>
             <a href="/suppliers">Supplier research</a>
