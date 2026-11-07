@@ -140,6 +140,72 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
     }
   });
 
+
+  // AI deal closer: prepare an evidence-based close plan for human review.
+  // It does not contact prospects, create offers, or mark deals as won.
+  router.post('/leads/:id/close-plan', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: 'AI deal closer is not configured. Add OPENAI_API_KEY to the API environment.' });
+
+    const lead = await prisma.lead.findFirst({
+      where: { id: req.params.id, ...(user.role === 'admin' ? {} : { ownerId: user.id }) },
+      include: { activities: { orderBy: { createdAt: 'desc' }, take: 10 } },
+    });
+    if (!lead) return res.status(404).json({ error: 'Lead not found.' });
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(20000),
+        body: JSON.stringify({
+          model: process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini',
+          temperature: 0.2,
+          max_tokens: 650,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: 'You are an ethical B2B deal-closer coach. Analyze only supplied evidence. Never invent buyer intent, budget, authority, deadlines, objections, product capabilities, pricing, commitments, or relationship history. Clearly label unknowns. Do not pressure, deceive, or imply a deal is ready to close without evidence. Return JSON with dealReadiness (one of NOT_READY, NEEDS_DISCOVERY, PROPOSAL_READY, DECISION_PENDING), qualificationGaps (array of strings), likelyObjections (array of objects with objection and evidenceBasedResponse strings), closingPlan (array of strings), suggestedCloseMessage (string), nextBestAction (string), confidenceNote (string). Keep the plan practical and respectful.' },
+            { role: 'user', content: JSON.stringify({
+              companyName: lead.companyName, contactName: lead.contactName, verifiedEmail: lead.email,
+              website: lead.website, source: lead.source, publicRecordDescription: lead.description,
+              awardAmount: lead.awardAmount?.toString() ?? null, currentStage: lead.stage,
+              operatorNotes: lead.notes,
+              recentActivity: lead.activities.map((a) => ({ type: a.type, description: a.description.slice(0, 1000), createdAt: a.createdAt })),
+            }) },
+          ],
+        }),
+      });
+      if (!response.ok) throw new Error(`OpenAI returned HTTP ${response.status}.`);
+      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const raw = payload.choices?.[0]?.message?.content;
+      if (!raw) throw new Error('AI returned an empty close plan.');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const allowedReadiness = ['NOT_READY', 'NEEDS_DISCOVERY', 'PROPOSAL_READY', 'DECISION_PENDING'];
+      const safePlan = {
+        dealReadiness: typeof parsed.dealReadiness === 'string' && allowedReadiness.includes(parsed.dealReadiness) ? parsed.dealReadiness : 'NEEDS_DISCOVERY',
+        qualificationGaps: Array.isArray(parsed.qualificationGaps) ? parsed.qualificationGaps.filter((v): v is string => typeof v === 'string').slice(0, 8) : [],
+        likelyObjections: Array.isArray(parsed.likelyObjections) ? parsed.likelyObjections.slice(0, 6).map((v) => {
+          const item = v && typeof v === 'object' ? v as Record<string, unknown> : {};
+          return { objection: typeof item.objection === 'string' ? item.objection.slice(0, 300) : 'Unknown objection', evidenceBasedResponse: typeof item.evidenceBasedResponse === 'string' ? item.evidenceBasedResponse.slice(0, 600) : 'Ask a clarifying question before responding.' };
+        }) : [],
+        closingPlan: Array.isArray(parsed.closingPlan) ? parsed.closingPlan.filter((v): v is string => typeof v === 'string').slice(0, 8) : [],
+        suggestedCloseMessage: typeof parsed.suggestedCloseMessage === 'string' ? parsed.suggestedCloseMessage.slice(0, 2500) : '',
+        nextBestAction: typeof parsed.nextBestAction === 'string' ? parsed.nextBestAction.slice(0, 500) : 'Verify the decision process and buyer requirements.',
+        confidenceNote: typeof parsed.confidenceNote === 'string' ? parsed.confidenceNote.slice(0, 500) : 'Based only on the information currently saved for this lead.',
+        requiresHumanReview: true,
+        status: 'PLAN_ONLY_NOT_SENT',
+      };
+      await prisma.leadActivity.create({
+        data: { leadId: lead.id, type: 'ai_close_plan', description: JSON.stringify(safePlan) },
+      });
+      return res.json({ leadId: lead.id, closePlan: safePlan });
+    } catch (error) {
+      console.error('AI deal close plan failed', error);
+      return res.status(502).json({ error: 'Unable to generate a deal close plan. No message was sent and the lead stage was not changed.' });
+    }
+  });
+
   router.patch('/leads/:id', async (req, res) => {
     const user = (req as AuthReq).user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
