@@ -452,16 +452,51 @@ app.post('/buyer-inquiries', async (req, res) => {
   }
 });
 
+
+app.get('/buyer-inquiries', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
+  try {
+    const inquiries = await prisma.buyerDemandEvent.findMany({
+      where: { status: { in: ['NEW', 'CONTACTED', 'CLOSED'] }, buyerEmail: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: {
+        id: true, buyerName: true, buyerEmail: true, companyName: true,
+        interest: true, message: true, status: true, createdAt: true,
+      },
+    });
+    return res.json({ inquiries });
+  } catch (error) {
+    console.error('Buyer inquiry inbox failed', error);
+    return res.status(500).json({ error: 'Unable to load buyer inquiries.' });
+  }
+});
+
+app.patch('/buyer-inquiries/:id', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
+  const parsed = z.object({ status: z.enum(['NEW', 'CONTACTED', 'CLOSED']) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Choose a valid inquiry status.' });
+  try {
+    const result = await prisma.buyerDemandEvent.updateMany({
+      where: { id: String(req.params.id), buyerEmail: { not: null }, status: { in: ['NEW', 'CONTACTED', 'CLOSED'] } },
+      data: { status: parsed.data.status },
+    });
+    if (!result.count) return res.status(404).json({ error: 'Buyer inquiry not found.' });
+    return res.json({ status: parsed.data.status });
+  } catch (error) {
+    console.error('Buyer inquiry update failed', error);
+    return res.status(500).json({ error: 'Unable to update buyer inquiry.' });
+  }
+});
+
 // Aggregate real marketplace search activity. Search phrases are collected without IPs,
 // contact details, account IDs, or browser fingerprints.
 app.get('/demand/summary', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
   try {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const [totalSearches, topQueries, categoryDemand, zeroResultSearches] = await Promise.all([
-      prisma.buyerDemandEvent.count({ where: { createdAt: { gte: since } } }),
+      prisma.buyerDemandEvent.count({ where: { status: 'SEARCH', createdAt: { gte: since } } }),
       prisma.buyerDemandEvent.groupBy({
         by: ['query'],
-        where: { createdAt: { gte: since } },
+        where: { status: 'SEARCH', createdAt: { gte: since } },
         _count: { _all: true },
         _avg: { resultCount: true },
         orderBy: { _count: { query: 'desc' } },
@@ -469,12 +504,12 @@ app.get('/demand/summary', requireAuth, requireRole(['seller', 'admin']), async 
       }),
       prisma.buyerDemandEvent.groupBy({
         by: ['category'],
-        where: { createdAt: { gte: since }, category: { not: null } },
+        where: { status: 'SEARCH', createdAt: { gte: since }, category: { not: null } },
         _count: { _all: true },
         orderBy: { _count: { category: 'desc' } },
         take: 8,
       }),
-      prisma.buyerDemandEvent.count({ where: { createdAt: { gte: since }, resultCount: 0 } }),
+      prisma.buyerDemandEvent.count({ where: { status: 'SEARCH', createdAt: { gte: since }, resultCount: 0 } }),
     ]);
 
     return res.json({
@@ -532,7 +567,7 @@ app.get('/pricing/recommendations', requireAuth, requireRole(['seller', 'admin']
         take: 1000,
       }),
       prisma.buyerDemandEvent.findMany({
-        where: { createdAt: { gte: since } },
+        where: { status: 'SEARCH', createdAt: { gte: since } },
         select: { query: true, resultCount: true },
         orderBy: { createdAt: 'desc' },
         take: 2000,
