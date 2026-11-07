@@ -138,6 +138,36 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
   });
 
 
+
+  router.get('/products', async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    try {
+      const products = await prisma.dataset.findMany({
+        where: { sellerId: user.id, tags: { has: 'factory:v1' } },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+          id: true, title: true, category: true, qualityScore: true,
+          sourceCount: true, status: true, licenseType: true, createdAt: true,
+          tags: true,
+        },
+      });
+      return res.json({
+        products: products.map((product) => ({
+          id: product.id, title: product.title, category: product.category,
+          qualityScore: product.qualityScore, sourceCount: product.sourceCount,
+          recordCount: product.tags.filter((tag) => tag.startsWith('source-record-id:')).length,
+          status: product.status.toLowerCase(), licenseStatus: product.licenseType === 'RESTRICTED' ? 'review_required' : 'unknown',
+          createdAt: product.createdAt,
+        })),
+      });
+    } catch (error) {
+      console.error('Product Factory list failed', error);
+      return res.status(500).json({ error: 'Unable to load product drafts.' });
+    }
+  });
+
   // Create a private, unpriced/unpublished product draft from selected saved research.
   // Source IDs remain attached to the Dataset tags so provenance can be resolved later.
   router.post('/products', async (req: AuthReq, res) => {
