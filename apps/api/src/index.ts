@@ -356,12 +356,93 @@ app.get('/users', requireAuth, requireRole(['admin']), async (_req, res) => {
   return res.json({ users: users.map((user) => serializeUser(user)) });
 });
 
-app.get('/datasets', async (_req, res) => {
-  const datasets = await prisma.dataset.findMany({
-    where: { AND: [{ status: 'PUBLISHED' }, nonDemoDatasetFilter] },
-    orderBy: { createdAt: 'desc' },
-  });
-  return res.json({ datasets: datasets.map(serializeDataset) });
+app.get('/datasets', async (req, res) => {
+  const rawQuery = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+  const normalizedQuery = rawQuery.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/gi, '[email]')
+    .replace(/\\+?\\d[\\d ()-]{7,}\\d/g, '[phone]')
+    .replace(/\\s+/g, ' ').toLowerCase().slice(0, 80);
+  const where: any = {
+    AND: [
+      { status: 'PUBLISHED' },
+      nonDemoDatasetFilter,
+      ...(rawQuery.length >= 2 ? [{
+        OR: [
+          { title: { contains: rawQuery, mode: 'insensitive' } },
+          { category: { contains: rawQuery, mode: 'insensitive' } },
+          { description: { contains: rawQuery, mode: 'insensitive' } },
+          { tags: { has: rawQuery.toLowerCase() } },
+        ],
+      }] : []),
+    ],
+  };
+
+  try {
+    const datasets = await prisma.dataset.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    if (normalizedQuery.length >= 2) {
+      // Store search intent only: no IP address, email, account ID, or browser fingerprint.
+      await prisma.buyerDemandEvent.create({
+        data: { query: normalizedQuery, resultCount: datasets.length },
+      });
+    }
+    return res.json({
+      datasets: datasets.map(serializeDataset),
+      search: rawQuery.length >= 2 ? { query: normalizedQuery, resultCount: datasets.length, tracked: normalizedQuery.length >= 2 } : null,
+    });
+  } catch (error) {
+    console.error('Marketplace dataset search failed', error);
+    return res.status(500).json({ error: 'Unable to search marketplace datasets.' });
+  }
+});
+
+// Aggregate real marketplace search activity. Search phrases are collected without IPs,
+// contact details, account IDs, or browser fingerprints.
+app.get('/demand/summary', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
+  try {
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [totalSearches, topQueries, categoryDemand, zeroResultSearches] = await Promise.all([
+      prisma.buyerDemandEvent.count({ where: { createdAt: { gte: since } } }),
+      prisma.buyerDemandEvent.groupBy({
+        by: ['query'],
+        where: { createdAt: { gte: since } },
+        _count: { _all: true },
+        _avg: { resultCount: true },
+        orderBy: { _count: { query: 'desc' } },
+        take: 10,
+      }),
+      prisma.buyerDemandEvent.groupBy({
+        by: ['category'],
+        where: { createdAt: { gte: since }, category: { not: null } },
+        _count: { _all: true },
+        orderBy: { _count: { category: 'desc' } },
+        take: 8,
+      }),
+      prisma.buyerDemandEvent.count({ where: { createdAt: { gte: since }, resultCount: 0 } }),
+    ]);
+
+    return res.json({
+      source: 'recorded_marketplace_searches',
+      windowDays: 30,
+      totalSearches,
+      zeroResultSearches,
+      topQueries: topQueries.map((item) => ({
+        query: item.query,
+        searches: item._count._all,
+        averageResults: Math.round(item._avg.resultCount ?? 0),
+      })),
+      categoryDemand: categoryDemand.map((item) => ({
+        category: item.category,
+        searches: item._count._all,
+      })),
+      note: 'These are actual search events recorded by the marketplace, not estimated market size, purchase intent, or sales.',
+    });
+  } catch (error) {
+    console.error('Buyer demand summary failed', error);
+    return res.status(500).json({ error: 'Unable to load buyer demand intelligence.' });
+  }
 });
 
 app.get('/datasets/:id', async (req, res) => {
