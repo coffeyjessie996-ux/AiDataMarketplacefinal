@@ -39,7 +39,7 @@ export async function analyzePublicResearchRecord(
   const deterministicAnalysis = (): AiResearchAnalysis => {
     const amount = Number(record.awardAmount ?? 0);
     const hasSupplier = Boolean(record.supplierName?.trim());
-    const hasSourceUrl = /^https?:\\/\\//i.test(record.sourceUrl);
+    const hasSourceUrl = record.sourceUrl.startsWith('https://') || record.sourceUrl.startsWith('http://');
     const hasDescription = ['description', 'Description', 'awardDescription'].some((key) =>
       typeof sourcePayload[key] === 'string' && String(sourcePayload[key]).trim().length > 20
     );
