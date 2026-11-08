@@ -968,7 +968,7 @@ app.post('/orders', requireAuth, async (req, res) => {
       },
     });
 
-    const baseUrl = (process.env.FRONTEND_URL || 'https://aidatamarketplacefinal.vercel.app').replace(/\\/$/, '');
+    const baseUrl = (process.env.FRONTEND_URL || 'https://aidatamarketplacefinal.vercel.app').replace(/\/$/, '');
     try {
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
