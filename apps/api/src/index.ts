@@ -925,8 +925,7 @@ const stripeClient = () => {
   return new Stripe(secretKey);
 };
 
-// Stripe Checkout remains gated until downloadable dataset delivery is implemented and
-// verified. This prevents charging buyers for listings that cannot yet deliver an asset.
+// Stripe Checkout is gated until secure dataset delivery and its end-to-end tests are verified.
 app.post('/orders', requireAuth, async (req, res) => {
   const parsed = z.object({ datasetId: z.string().min(1).max(128) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'A valid datasetId is required.' });
@@ -961,6 +960,12 @@ app.post('/orders', requireAuth, async (req, res) => {
       .map((tag) => tag.slice('source-record-id:'.length));
     if (includedRecordIds.length === 0) {
       return res.status(409).json({ error: 'This listing has no attached source records and cannot be delivered.' });
+    }
+    const availableRecordCount = await prisma.supplierResearchRecord.count({
+      where: { id: { in: includedRecordIds } },
+    });
+    if (availableRecordCount !== includedRecordIds.length) {
+      return res.status(409).json({ error: 'Some source records are missing; this listing cannot be sold yet.' });
     }
     if (dataset.sellerId === user.id) return res.status(400).json({ error: 'You cannot purchase your own dataset.' });
 
