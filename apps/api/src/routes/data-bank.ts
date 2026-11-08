@@ -404,7 +404,7 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
       const csvCell = (value: unknown) => {
         let text = value === null || value === undefined ? '' : String(value);
         // Prevent spreadsheet formula execution when buyers open exported CSV files.
-        if (/^[\\s]*[=+\\-@]/.test(text)) text = `'${text}`;
+        if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
         return '"' + text.replace(/"/g, '""') + '"';
       };
       const rows = records.map((record) => {
