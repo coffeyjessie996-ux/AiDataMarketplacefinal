@@ -947,7 +947,7 @@ app.post('/orders', requireAuth, async (req, res) => {
     const dataset = await prisma.dataset.findFirst({
       where: {
         AND: [
-          { id: parsed.data.datasetId, status: 'PUBLISHED', priceCents: { gt: 0 }, licenseType: { not: 'RESTRICTED' } },
+          { id: parsed.data.datasetId, status: 'PUBLISHED', priceCents: { gt: 0 }, licenseType: { not: 'RESTRICTED' }, tags: { has: 'factory:v1' } },
           nonDemoDatasetFilter,
         ],
       },
@@ -956,6 +956,12 @@ app.post('/orders', requireAuth, async (req, res) => {
       },
     });
     if (!dataset) return res.status(404).json({ error: 'This dataset is not available for purchase.' });
+    const includedRecordIds = dataset.tags
+      .filter((tag) => tag.startsWith('source-record-id:'))
+      .map((tag) => tag.slice('source-record-id:'.length));
+    if (includedRecordIds.length === 0) {
+      return res.status(409).json({ error: 'This listing has no attached source records and cannot be delivered.' });
+    }
     if (dataset.sellerId === user.id) return res.status(400).json({ error: 'You cannot purchase your own dataset.' });
 
     const order = await prisma.order.create({
@@ -1062,6 +1068,106 @@ app.post('/webhooks/stripe', async (req, res) => {
   } catch (error) {
     console.error('Stripe webhook processing failed', error);
     return res.status(500).json({ error: 'Webhook processing failed.' });
+  }
+});
+
+// A buyer can check the server-side order state after Stripe redirects back.
+// This endpoint never marks an order paid; only the signed webhook can do that.
+app.get('/orders/checkout-session/:sessionId', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  const sessionId = String(req.params.sessionId || '');
+  if (!/^cs_(live|test)_[A-Za-z0-9]+$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid Checkout session reference.' });
+  }
+  const stripe = stripeClient();
+  if (!stripe) return res.status(503).json({ error: 'Stripe is not configured on the server.' });
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const orderId = session.metadata?.orderId;
+    if (session.mode !== 'payment' || session.metadata?.buyerId !== user.id || !orderId) {
+      return res.status(404).json({ error: 'Checkout session not found for this account.' });
+    }
+    const order = await prisma.order.findFirst({
+      where: { id: orderId, buyerId: user.id },
+      select: { id: true, status: true, totalCents: true, currency: true },
+    });
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    return res.json({
+      orderId: order.id,
+      status: order.status.toLowerCase(),
+      paymentStatus: session.payment_status,
+      totalCents: order.totalCents,
+      currency: order.currency,
+    });
+  } catch (error) {
+    console.error('Stripe Checkout session lookup failed', error);
+    return res.status(502).json({ error: 'Unable to verify Checkout status right now.' });
+  }
+});
+
+// Dataset delivery is generated from the original saved public USAspending records.
+// Access is restricted to the authenticated buyer on an order confirmed PAID by webhook.
+app.get('/orders/:id/download', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  try {
+    const order = await prisma.order.findFirst({
+      where: { id: String(req.params.id), buyerId: user.id, status: 'PAID' },
+      include: { dataset: true },
+    });
+    if (!order) return res.status(404).json({ error: 'A paid order for this account was not found.' });
+    const recordIds = order.dataset.tags
+      .filter((tag) => tag.startsWith('source-record-id:'))
+      .map((tag) => tag.slice('source-record-id:'.length));
+    if (recordIds.length === 0) return res.status(409).json({ error: 'The purchased listing has no attached source records.' });
+
+    const records = await prisma.supplierResearchRecord.findMany({
+      where: { id: { in: recordIds }, source: 'usaspending.gov' },
+      orderBy: [{ retrievedAt: 'desc' }, { supplierName: 'asc' }],
+    });
+    if (records.length !== recordIds.length) {
+      return res.status(409).json({ error: 'The complete source record set is not available for delivery. Contact the seller for assistance.' });
+    }
+
+    const csvCell = (value: unknown) => {
+      let text = value === null || value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value);
+      if (/^[\\s]*[=+\\-@]/.test(text)) text = `'${text}`;
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+    const headers = ['supplierName', 'awardAmount', 'awardId', 'awardingAgency', 'description', 'startDate', 'endDate', 'performanceState', 'naics', 'supplierUei', 'source', 'sourceRecordId', 'sourceUrl', 'retrievedAt', 'sourcePayloadJson'];
+    const rows = records.map((record) => {
+      const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+        ? record.payload as Record<string, unknown>
+        : {};
+      const values = [
+        record.supplierName,
+        record.awardAmount?.toString() ?? payload.awardAmount,
+        record.sourceRecordId,
+        payload.awardingAgency,
+        payload.description,
+        payload.startDate,
+        payload.endDate,
+        payload.performanceState,
+        payload.naics,
+        payload.supplierUei,
+        record.source,
+        record.sourceRecordId,
+        record.sourceUrl,
+        record.retrievedAt.toISOString(),
+        payload,
+      ];
+      return values.map(csvCell).join(',');
+    });
+    const csv = [headers.map(csvCell).join(','), ...rows].join('\\r\\n');
+    const safeName = order.dataset.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'dataset';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-${order.id}.csv"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.status(200).send('\\uFEFF' + csv);
+  } catch (error) {
+    console.error('Paid dataset download failed', error);
+    return res.status(500).json({ error: 'Unable to prepare the purchased dataset download.' });
   }
 });
 
