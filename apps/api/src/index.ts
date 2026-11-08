@@ -1161,7 +1161,7 @@ app.get('/orders/:id/download', requireAuth, async (req, res) => {
       include: { dataset: true },
     });
     if (!order) return res.status(404).json({ error: 'A paid order for this account was not found.' });
-    if (!order.dataset.tags.includes('factory:v1') || order.dataset.licenseType === 'RESTRICTED') {
+    if (order.dataset.status !== 'PUBLISHED' || order.dataset.licenseType === 'RESTRICTED' || !order.dataset.tags.includes('factory:v1')) {
       return res.status(409).json({ error: 'This purchased listing is not approved for automated file delivery.' });
     }
     const recordIds = order.dataset.tags
