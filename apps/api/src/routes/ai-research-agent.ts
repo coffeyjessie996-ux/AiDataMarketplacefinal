@@ -40,12 +40,11 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
     const secret = process.env.CRON_SECRET;
     if (!secret) return res.status(503).json({ error: 'AI research agent is not configured: CRON_SECRET is missing.' });
     if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized AI research request.' });
-    if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: 'AI research agent is not configured: OPENAI_API_KEY is missing.' });
 
     const taskId = await startAgentTask(
       prisma,
-      'OpenAI research analyst',
-      'Analyze new Data Bank records and recommend evidence-based next steps',
+      'Public-record research triage',
+      'Analyze new Data Bank records using AI when available or a no-cost rules-based fallback',
       'ai_agent',
     );
 
@@ -93,8 +92,8 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
                 ...existingPayload,
                 aiResearchAnalysis: {
                   ...analysis,
-                  analysisType: 'AI triage - not supplier verification',
-                  model: process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini',
+                  analysisType: process.env.OPENAI_API_KEY ? 'AI or rules-based fallback triage - not supplier verification' : 'Rules-based no-cost triage - not supplier verification',
+                  model: process.env.OPENAI_API_KEY ? (process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini; quota fallback enabled') : 'deterministic-rules-v1',
                   generatedAt: new Date().toISOString(),
                 },
               })),
@@ -125,7 +124,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       });
       return res.json({
         ok: failed === 0,
-        agent: 'OpenAI research analyst',
+        agent: 'Public-record research triage',
         processed,
         analyzed: saved,
         failed,
