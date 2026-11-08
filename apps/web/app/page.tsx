@@ -31,6 +31,8 @@ export default function HomePage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
+  const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -63,7 +65,32 @@ export default function HomePage() {
     fetchData();
   }, []);
 
-  const formatMoney = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  const formatMoney = (cents: number) => `${(cents / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+
+  const startCheckout = async (datasetId: string) => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      window.location.href = '/login?next=/';
+      return;
+    }
+    setCheckoutLoadingId(datasetId);
+    setCheckoutError('');
+    try {
+      const response = await fetch(`${API}/orders`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ datasetId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.checkoutUrl !== 'string') {
+        throw new Error(data.error || 'Secure checkout is not available for this listing yet.');
+      }
+      window.location.assign(data.checkoutUrl);
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : 'Unable to start checkout.');
+      setCheckoutLoadingId(null);
+    }
+  };
 
   return (
     <main className="page-shell">
@@ -89,7 +116,7 @@ export default function HomePage() {
             <span className="eyebrow">AI DATA MARKETPLACE</span>
             <h1>Search the web, clean the data, and sell it at scale.</h1>
             <p>
-              Discover market signals, organize real supplier and business intelligence, and prepare datasets for marketplace sales. Payment processing and cashouts stay disabled until a verified provider is connected.
+              Discover market signals, organize real supplier and business intelligence, and prepare datasets for marketplace sales. Eligible listings use secure Stripe checkout, and downloads unlock only after payment is confirmed.
             </p>
             <div className="cta-row">
               <a href="#catalog" className="primary-button">Browse datasets</a>
@@ -119,7 +146,7 @@ export default function HomePage() {
                 Live figures unavailable: {dataError}
               </p>
             )}
-            <p className="marketplace-data-note">Figures appear only when the connected database responds. Orders marked paid in the database are not proof that a payment processor settled funds. Checkout and payouts are currently disabled.</p>
+            <p className="marketplace-data-note">Figures come from the connected database. Only Stripe-confirmed paid orders count as completed purchases; seller payouts remain disabled until a separate payout integration is verified.</p>
           </div>
         </div>
       </section>
@@ -151,6 +178,7 @@ export default function HomePage() {
           <a href="/dashboard" className="secondary-button">Seller dashboard</a>
         </div>
 
+        {checkoutError && <p role="alert" style={{ color: '#fca5a5', marginBottom: 14 }}>{checkoutError}</p>}
         {loading ? (
           <p className="empty-state">Loading marketplace...</p>
         ) : (
@@ -178,6 +206,11 @@ export default function HomePage() {
                     <strong>{formatMoney(dataset.priceCents)}</strong>
                   </div>
                 </div>
+                {dataset.tags.includes('factory:v1') && dataset.status === 'published' && dataset.priceCents > 0 && dataset.licenseType !== 'restricted' && (
+                  <button className="primary-button" type="button" onClick={() => void startCheckout(dataset.id)} disabled={checkoutLoadingId === dataset.id}>
+                    {checkoutLoadingId === dataset.id ? 'Opening secure checkout…' : 'Buy securely'}
+                  </button>
+                )}
               </article>
             ))}
           </div>

@@ -348,5 +348,85 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
     }
   });
 
+
+  // Deliver a CSV export only to the dataset owner/admin or a buyer with a PAID order.
+  // Payload fields are allow-listed so incidental contact details are never exported.
+  router.get('/products/:id/download', async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+
+    try {
+      const product = await prisma.dataset.findFirst({
+        where: {
+          id: String(req.params.id),
+          status: 'PUBLISHED',
+          licenseType: { in: ['COMMERCIAL', 'PERSONAL', 'ENTERPRISE'] },
+          tags: { has: 'factory:v1' },
+        },
+        select: { id: true, title: true, sellerId: true, tags: true },
+      });
+      if (!product) return res.status(404).json({ error: 'Published dataset not found or not available for download.' });
+
+      const isOwner = product.sellerId === user.id;
+      const isAdmin = user.role === 'admin';
+      if (!isOwner && !isAdmin) {
+        const paidOrder = await prisma.order.findFirst({
+          where: { buyerId: user.id, datasetId: product.id, status: 'PAID' },
+          select: { id: true },
+        });
+        if (!paidOrder) return res.status(403).json({ error: 'A completed paid order is required to download this dataset.' });
+      }
+
+      const recordIds = product.tags
+        .filter((tag) => tag.startsWith('source-record-id:'))
+        .map((tag) => tag.slice('source-record-id:'.length))
+        .filter(Boolean);
+      if (recordIds.length === 0) return res.status(409).json({ error: 'This dataset has no attached source records to deliver.' });
+
+      const records = await prisma.supplierResearchRecord.findMany({
+        where: { id: { in: recordIds } },
+        orderBy: [{ retrievedAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+          source: true, sourceRecordId: true, supplierName: true,
+          awardAmount: true, sourceUrl: true, payload: true, retrievedAt: true,
+        },
+      });
+      if (records.length === 0) return res.status(409).json({ error: 'The source records for this dataset are no longer available.' });
+
+      const payloadFields = [
+        'title', 'description', 'awardingAgency', 'awardId', 'noticeId',
+        'naics', 'supplierUei', 'startDate', 'endDate', 'postedDate', 'responseDeadline',
+      ];
+      const headers = [
+        'source', 'source_record_id', 'supplier_name', 'award_amount_usd',
+        'source_url', 'retrieved_at', ...payloadFields,
+      ];
+      const csvCell = (value: unknown) => {
+        let text = value === null || value === undefined ? '' : String(value);
+        // Prevent spreadsheet formula execution when buyers open exported CSV files.
+        if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
+        return '"' + text.replace(/"/g, '""') + '"';
+      };
+      const rows = records.map((record) => {
+        const payload = asObject(record.payload);
+        return [
+          record.source, record.sourceRecordId, record.supplierName,
+          record.awardAmount?.toString() ?? '', record.sourceUrl,
+          record.retrievedAt.toISOString(),
+          ...payloadFields.map((field) => payload[field]),
+        ].map(csvCell).join(',');
+      });
+      const csv = [headers.map(csvCell).join(','), ...rows].join('\r\n');
+      const safeName = product.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'dataset';
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.csv"`);
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.status(200).send(csv);
+    } catch (error) {
+      console.error('Dataset download failed', error);
+      return res.status(500).json({ error: 'Unable to prepare the dataset download.' });
+    }
+  });
+
   return router;
 }

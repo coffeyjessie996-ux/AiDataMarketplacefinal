@@ -3,6 +3,7 @@ import * as Sentry from '@sentry/node';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
+import Stripe from 'stripe';
 import { createHash, randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
@@ -27,7 +28,11 @@ const port = Number(process.env.PORT || 4000);
 
 const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
 app.use(cors({ origin: allowedOrigin }));
-app.use(express.json());
+app.use(express.json({
+  verify: (req, _res, buffer) => {
+    (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+  },
+}));
 
 // The web app calls `/api/*` (rewritten to this service), while routes are defined without the prefix.
 app.use((req, _res, next) => {
@@ -914,12 +919,317 @@ app.post('/wallet/payout', requireAuth, async (_req, res) => {
   });
 });
 
-app.post('/orders', requireAuth, async (_req, res) => {
-  // The current wallet flow is not backed by a verified payment processor.
-  // Block it rather than recording an order as PAID without a real payment.
-  return res.status(503).json({
-    error: 'Checkout is not enabled yet. A verified payment integration is required before purchases can be completed.',
-  });
+const stripeClient = () => {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) return null;
+  return new Stripe(secretKey);
+};
+
+// Stripe Checkout is gated until secure dataset delivery and its end-to-end tests are verified.
+app.get('/orders/:id', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: String(req.params.id) },
+      include: { dataset: { select: { id: true, title: true, sellerId: true, tags: true } } },
+    });
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    if (order.buyerId !== user.id && order.dataset.sellerId !== user.id && user.role !== 'admin') {
+      return res.status(403).json({ error: 'You are not allowed to view this order.' });
+    }
+    return res.json({
+      order: {
+        id: order.id,
+        status: order.status.toLowerCase(),
+        totalCents: order.totalCents,
+        currency: order.currency,
+        datasetId: order.datasetId,
+        datasetTitle: order.dataset.title,
+        downloadAvailable: order.status === 'PAID' && order.dataset.tags.includes('factory:v1'),
+      },
+    });
+  } catch (error) {
+    console.error('Order status lookup failed', error);
+    return res.status(500).json({ error: 'Unable to load order status.' });
+  }
+});
+
+app.post('/orders', requireAuth, async (req, res) => {
+  const parsed = z.object({ datasetId: z.string().min(1).max(128) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'A valid datasetId is required.' });
+
+  if (process.env.STRIPE_CHECKOUT_ENABLED !== 'true') {
+    return res.status(503).json({
+      error: 'Checkout is not enabled yet. Secure dataset delivery must be ready before buyers can be charged.',
+    });
+  }
+
+  const stripe = stripeClient();
+  if (!stripe) return res.status(503).json({ error: 'Stripe is not configured on the server.' });
+
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+
+  try {
+    const dataset = await prisma.dataset.findFirst({
+      where: {
+        AND: [
+          { id: parsed.data.datasetId, status: 'PUBLISHED', priceCents: { gt: 0 }, licenseType: { not: 'RESTRICTED' }, tags: { has: 'factory:v1' } },
+          nonDemoDatasetFilter,
+        ],
+      },
+      include: {
+        seller: { select: { email: true } },
+      },
+    });
+    if (!dataset) return res.status(404).json({ error: 'This dataset is not available for purchase.' });
+    const includedRecordIds = dataset.tags
+      .filter((tag) => tag.startsWith('source-record-id:'))
+      .map((tag) => tag.slice('source-record-id:'.length));
+    if (includedRecordIds.length === 0) {
+      return res.status(409).json({ error: 'This listing has no attached source records and cannot be delivered.' });
+    }
+    if (new Set(includedRecordIds).size !== includedRecordIds.length) {
+      return res.status(409).json({ error: 'This listing contains duplicate source references and cannot be sold yet.' });
+    }
+    if (!dataset.tags.includes('license-review-status:seller_reviewed') ||
+        !dataset.tags.some((tag) => tag.startsWith('license-review-evidence:'))) {
+      return res.status(409).json({ error: 'Seller source-rights review and evidence are required before checkout.' });
+    }
+    const availableRecordCount = await prisma.supplierResearchRecord.count({
+      where: { id: { in: includedRecordIds }, source: 'usaspending.gov' },
+    });
+    if (availableRecordCount !== includedRecordIds.length) {
+      return res.status(409).json({ error: 'This delivery currently supports only complete USAspending record sets.' });
+    }
+    if (dataset.sellerId === user.id) return res.status(400).json({ error: 'You cannot purchase your own dataset.' });
+
+    // Reuse a pending order so client retries cannot create duplicate Stripe sessions.
+    const existingPendingOrder = await prisma.order.findFirst({
+      where: { buyerId: user.id, datasetId: dataset.id, status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+    });
+    const order = existingPendingOrder ?? await prisma.order.create({
+      data: {
+        buyerId: user.id,
+        datasetId: dataset.id,
+        totalCents: dataset.priceCents,
+        currency: 'USD',
+        status: 'PENDING',
+      },
+    });
+
+    const baseUrl = (process.env.FRONTEND_URL || 'https://aidatamarketplacefinal.vercel.app').replace(/\/$/, '');
+    try {
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [{
+          quantity: 1,
+          price_data: {
+            currency: 'usd',
+            unit_amount: order.totalCents,
+            product_data: {
+              name: dataset.title.slice(0, 250),
+              description: dataset.description.slice(0, 500),
+            },
+          },
+        }],
+        client_reference_id: order.id,
+        metadata: { orderId: order.id, datasetId: dataset.id, buyerId: user.id },
+        success_url: `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/?checkout=cancelled`,
+      }, { idempotencyKey: `marketplace-order-${order.id}` });
+      if (!session.url) throw new Error('Stripe did not return a Checkout URL.');
+      return res.status(201).json({ orderId: order.id, checkoutUrl: session.url, status: 'pending' });
+    } catch (stripeError) {
+      // Keep the order PENDING so a retry can reuse the same Stripe idempotency key.
+      throw stripeError;
+    }
+  } catch (error) {
+    console.error('Stripe Checkout session creation failed', error);
+    return res.status(502).json({ error: 'Unable to start secure checkout. No payment was confirmed.' });
+  }
+});
+
+// Stripe alone can confirm payment. Browser redirects never mark an order as paid.
+app.post('/webhooks/stripe', async (req, res) => {
+  const stripe = stripeClient();
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const signature = req.headers['stripe-signature'];
+  const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody;
+
+  if (!stripe || !webhookSecret) {
+    return res.status(503).json({ error: 'Stripe webhook is not configured.' });
+  }
+  if (typeof signature !== 'string' || !rawBody) {
+    return res.status(400).json({ error: 'Missing Stripe signature or raw request body.' });
+  }
+
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+  } catch (error) {
+    console.warn('Stripe webhook signature verification failed', error);
+    return res.status(400).json({ error: 'Invalid webhook signature.' });
+  }
+
+  try {
+    const session = event.data.object as Stripe.Checkout.Session;
+    if ([
+      'checkout.session.completed',
+      'checkout.session.async_payment_succeeded',
+      'checkout.session.async_payment_failed',
+      'checkout.session.expired',
+    ].includes(event.type)) {
+      const orderId = session.metadata?.orderId;
+      if (!orderId) return res.status(400).json({ error: 'Checkout session is missing its order reference.' });
+
+      const order = await prisma.order.findUnique({ where: { id: orderId } });
+      if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+      if (session.mode !== 'payment' || session.client_reference_id !== orderId) {
+        return res.status(400).json({ error: 'Stripe session does not match the order reference.' });
+      }
+
+      if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+        if (session.payment_status !== 'paid') return res.status(200).json({ received: true, pendingPayment: true });
+        const paidAmountMatches = session.amount_total === order.totalCents;
+        const currencyMatches = session.currency?.toLowerCase() === order.currency.toLowerCase();
+        const buyerMatches = session.metadata?.buyerId === order.buyerId;
+        const datasetMatches = session.metadata?.datasetId === order.datasetId;
+        if (!paidAmountMatches || !currencyMatches || !buyerMatches || !datasetMatches) {
+          console.error('Stripe session does not match stored order', { orderId, eventId: event.id });
+          return res.status(400).json({ error: 'Stripe payment does not match the stored order.' });
+        }
+        await prisma.order.updateMany({
+          where: { id: orderId, status: 'PENDING' },
+          data: { status: 'PAID' },
+        });
+      } else {
+        await prisma.order.updateMany({
+          where: { id: orderId, status: 'PENDING' },
+          data: { status: 'FAILED' },
+        });
+      }
+    }
+    return res.json({ received: true });
+  } catch (error) {
+    console.error('Stripe webhook processing failed', error);
+    return res.status(500).json({ error: 'Webhook processing failed.' });
+  }
+});
+
+// A buyer can check the server-side order state after Stripe redirects back.
+// This endpoint never marks an order paid; only the signed webhook can do that.
+app.get('/orders/checkout-session/:sessionId', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  const sessionId = String(req.params.sessionId || '');
+  if (!/^cs_(live|test)_[A-Za-z0-9]+$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid Checkout session reference.' });
+  }
+  const stripe = stripeClient();
+  if (!stripe) return res.status(503).json({ error: 'Stripe is not configured on the server.' });
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const orderId = session.metadata?.orderId;
+    if (session.mode !== 'payment' || session.metadata?.buyerId !== user.id || !orderId || session.client_reference_id !== orderId) {
+      return res.status(404).json({ error: 'Checkout session not found for this account.' });
+    }
+    const order = await prisma.order.findFirst({
+      where: { id: orderId, buyerId: user.id },
+      select: { id: true, datasetId: true, status: true, totalCents: true, currency: true },
+    });
+    if (!order || session.metadata?.datasetId !== order.datasetId ||
+        session.amount_total !== order.totalCents ||
+        session.currency?.toLowerCase() !== order.currency.toLowerCase()) {
+      return res.status(404).json({ error: 'Checkout session does not match this order.' });
+    }
+    return res.json({
+      orderId: order.id,
+      status: order.status.toLowerCase(),
+      paymentStatus: session.payment_status,
+      totalCents: order.totalCents,
+      currency: order.currency,
+    });
+  } catch (error) {
+    console.error('Stripe Checkout session lookup failed', error);
+    return res.status(502).json({ error: 'Unable to verify Checkout status right now.' });
+  }
+});
+
+// Dataset delivery is generated from the original saved public USAspending records.
+// Access is restricted to the authenticated buyer on an order confirmed PAID by webhook.
+app.get('/orders/:id/download', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  try {
+    const order = await prisma.order.findFirst({
+      where: { id: String(req.params.id), buyerId: user.id, status: 'PAID' },
+      include: { dataset: true },
+    });
+    if (!order) return res.status(404).json({ error: 'A paid order for this account was not found.' });
+    if (order.dataset.status !== 'PUBLISHED' ||
+        order.dataset.licenseType === 'RESTRICTED' ||
+        !order.dataset.tags.includes('factory:v1') ||
+        !order.dataset.tags.includes('license-review-status:seller_reviewed') ||
+        !order.dataset.tags.some((tag) => tag.startsWith('license-review-evidence:'))) {
+      return res.status(409).json({ error: 'This purchased listing is not approved for automated file delivery.' });
+    }
+    const recordIds = order.dataset.tags
+      .filter((tag) => tag.startsWith('source-record-id:'))
+      .map((tag) => tag.slice('source-record-id:'.length));
+    if (recordIds.length === 0 || new Set(recordIds).size !== recordIds.length) {
+      return res.status(409).json({ error: 'The purchased listing has no valid attached source records.' });
+    }
+
+    const records = await prisma.supplierResearchRecord.findMany({
+      where: { id: { in: recordIds }, source: 'usaspending.gov' },
+      orderBy: [{ retrievedAt: 'desc' }, { supplierName: 'asc' }],
+    });
+    if (records.length !== recordIds.length) {
+      return res.status(409).json({ error: 'The complete source record set is not available for delivery. Contact the seller for assistance.' });
+    }
+
+    const csvCell = (value: unknown) => {
+      let text = value === null || value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value);
+      if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+    const headers = ['supplierName', 'awardAmount', 'awardId', 'awardingAgency', 'description', 'startDate', 'endDate', 'performanceState', 'naics', 'supplierUei', 'source', 'sourceRecordId', 'sourceUrl', 'retrievedAt'];
+    const rows = records.map((record) => {
+      const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+        ? record.payload as Record<string, unknown>
+        : {};
+      const values = [
+        record.supplierName,
+        record.awardAmount?.toString() ?? payload.awardAmount,
+        payload.awardId ?? payload.generated_internal_id ?? record.sourceRecordId,
+        payload.awardingAgency,
+        payload.description,
+        payload.startDate,
+        payload.endDate,
+        payload.performanceState,
+        payload.naics,
+        payload.supplierUei,
+        record.source,
+        record.sourceRecordId,
+        record.sourceUrl,
+        record.retrievedAt.toISOString(),
+      ];
+      return values.map(csvCell).join(',');
+    });
+    const csv = [headers.map(csvCell).join(','), ...rows].join('\r\n');
+    const safeName = order.dataset.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'dataset';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-${order.id}.csv"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.status(200).send('\uFEFF' + csv);
+  } catch (error) {
+    console.error('Paid dataset download failed', error);
+    return res.status(500).json({ error: 'Unable to prepare the purchased dataset download.' });
+  }
 });
 
 // Public marketplace figures come from persisted database records only.

@@ -479,6 +479,44 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
   const [orders, setOrders] = useState<Array<{ id: string; datasetTitle: string; totalCents: number; currency: string; status: string; createdAt: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [downloadMessage, setDownloadMessage] = useState('');
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const downloadOrder = async (orderId: string) => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      setDownloadMessage('Please sign in again to download your purchase.');
+      return;
+    }
+    setDownloadingId(orderId);
+    setDownloadMessage('');
+    try {
+      const response = await fetch(`${API}/orders/${encodeURIComponent(orderId)}/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Unable to prepare your dataset download.');
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get('content-disposition') || '';
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] || 'marketplace-dataset.json';
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setDownloadMessage('Your dataset download has started.');
+    } catch (err) {
+      setDownloadMessage(err instanceof Error ? err.message : 'Dataset download failed.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -505,7 +543,8 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
   return (
     <div className="card">
       <h2 className="card-title">Purchase history</h2>
-      <p style={{ color: '#94a3b8', marginTop: '-8px' }}>Order records saved for your account. A database status does not independently confirm processor settlement.</p>
+      <p style={{ color: '#94a3b8', marginTop: '-8px' }}>Your completed purchases include a secure download when the payment is confirmed.</p>
+      {downloadMessage && <p role="status" style={{ color: '#94a3b8' }}>{downloadMessage}</p>}
       {error && <p role="alert" style={{ color: '#fbbf24' }}>{error}</p>}
       {loading ? (
         <p className="live-empty">Loading saved purchases…</p>
@@ -514,7 +553,7 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
       ) : (
         <div className="table-container">
           <table>
-            <thead><tr><th>Dataset</th><th>Date</th><th>Recorded total</th><th>Status</th></tr></thead>
+            <thead><tr><th>Dataset</th><th>Date</th><th>Recorded total</th><th>Status</th><th>Delivery</th></tr></thead>
             <tbody>
               {orders.map((order) => (
                 <tr key={order.id}>
@@ -522,6 +561,11 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
                   <td>{new Date(order.createdAt).toLocaleDateString()}</td>
                   <td>{formatMoney(order.totalCents)}</td>
                   <td><span className={`badge ${order.status.toLowerCase()}`}>{order.status}</span></td>
+                  <td>{order.status.toLowerCase() === 'paid' ? (
+                    <button type="button" className="primary-button" onClick={() => void downloadOrder(order.id)} disabled={downloadingId === order.id}>
+                      {downloadingId === order.id ? 'Preparing…' : 'Download dataset'}
+                    </button>
+                  ) : <span style={{ color: '#94a3b8' }}>Available after payment</span>}</td>
                 </tr>
               ))}
             </tbody>
