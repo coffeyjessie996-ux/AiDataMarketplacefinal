@@ -1124,7 +1124,7 @@ app.post('/orders', requireAuth, async (req, res) => {
         }],
         client_reference_id: order.id,
         metadata: { orderId: order.id, datasetId: dataset.id, buyerId: user.id },
-        success_url: `${baseUrl}/dashboard?checkout=success&order_id=${encodeURIComponent(order.id)}&session_id={CHECKOUT_SESSION_ID}`,
+        success_url: `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${baseUrl}/?checkout=cancelled`,
       });
       if (!session.url) throw new Error('Stripe did not return a Checkout URL.');
@@ -1357,109 +1357,6 @@ app.get('/marketplace/overview', async (_req, res) => {
 });
 
 // Authenticated dashboard figures are scoped to the signed-in account, except for admins.
-// Buyers can only inspect their own order and its server-confirmed payment status.
-app.get('/orders/:id', requireAuth, async (req, res) => {
-  const user = (req as express.Request & { user?: User }).user;
-  if (!user) return res.status(401).json({ error: 'Authentication required.' });
-  try {
-    const order = await prisma.order.findFirst({
-      where: { id: String(req.params.id), buyerId: user.id },
-      include: { dataset: { select: { title: true, category: true } } },
-    });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-    return res.json({
-      order: {
-        id: order.id,
-        status: order.status.toLowerCase(),
-        totalCents: order.totalCents,
-        currency: order.currency,
-        datasetTitle: order.dataset.title,
-        category: order.dataset.category,
-        createdAt: order.createdAt,
-      },
-      downloadable: order.status === 'PAID',
-    });
-  } catch (error) {
-    console.error('Order status lookup failed', error);
-    return res.status(500).json({ error: 'Unable to retrieve order status.' });
-  }
-});
-
-// Return the exact source records attached to the purchased product only after payment.
-app.get('/orders/:id/download', requireAuth, async (req, res) => {
-  const user = (req as express.Request & { user?: User }).user;
-  if (!user) return res.status(401).json({ error: 'Authentication required.' });
-  try {
-    const order = await prisma.order.findFirst({
-      where: { id: String(req.params.id), buyerId: user.id, status: 'PAID' },
-      include: { dataset: true },
-    });
-    if (!order) return res.status(404).json({ error: 'A paid order for this account was not found.' });
-
-    const dataset = order.dataset;
-    if (!dataset.tags.includes('factory:v1')) {
-      return res.status(409).json({ error: 'This product does not have a Data Bank delivery package.' });
-    }
-    const recordIds = dataset.tags
-      .filter((tag) => tag.startsWith('source-record-id:'))
-      .map((tag) => tag.slice('source-record-id:'.length));
-    if (recordIds.length === 0) {
-      return res.status(409).json({ error: 'No source records are attached to this dataset.' });
-    }
-
-    const records = await prisma.supplierResearchRecord.findMany({
-      where: { id: { in: recordIds } },
-      orderBy: [{ retrievedAt: 'desc' }, { createdAt: 'desc' }],
-      select: {
-        source: true,
-        sourceRecordId: true,
-        supplierName: true,
-        awardAmount: true,
-        sourceUrl: true,
-        payload: true,
-        retrievedAt: true,
-      },
-    });
-    if (records.length !== recordIds.length) {
-      return res.status(409).json({ error: 'The delivery package is incomplete. Please contact the marketplace.' });
-    }
-
-    const packageData = {
-      format: 'ai-data-marketplace.dataset.v1',
-      orderId: order.id,
-      purchasedAt: order.createdAt.toISOString(),
-      dataset: {
-        id: dataset.id,
-        title: dataset.title,
-        category: dataset.category,
-        description: dataset.description,
-        qualityScore: dataset.qualityScore,
-        recordCount: records.length,
-        sourceCount: dataset.sourceCount,
-        sources: dataset.tags.filter((tag) => tag.startsWith('source:')),
-      },
-      records: records.map((record) => ({
-        source: record.source,
-        sourceRecordId: record.sourceRecordId,
-        supplierName: record.supplierName,
-        awardAmount: record.awardAmount?.toString() ?? null,
-        sourceUrl: record.sourceUrl,
-        retrievedAt: record.retrievedAt.toISOString(),
-        data: record.payload,
-      })),
-      notice: 'Source links and retrieval timestamps are included for provenance. Buyers are responsible for complying with applicable source terms and the license stated on the listing.',
-    };
-    const safeName = dataset.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'dataset';
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.json"`);
-    res.setHeader('Cache-Control', 'private, no-store');
-    return res.status(200).send(JSON.stringify(packageData, null, 2));
-  } catch (error) {
-    console.error('Paid dataset download failed', error);
-    return res.status(500).json({ error: 'Unable to prepare the dataset download.' });
-  }
-});
-
 app.get('/dashboard/overview', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
   if (!user) return res.status(401).json({ error: 'Authentication required.' });
