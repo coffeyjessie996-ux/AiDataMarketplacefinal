@@ -1132,7 +1132,7 @@ app.get('/orders/:id/download', requireAuth, async (req, res) => {
 
     const csvCell = (value: unknown) => {
       let text = value === null || value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value);
-      if (/^[\\s]*[=+\\-@]/.test(text)) text = `'${text}`;
+      if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
       return `"${text.replace(/"/g, '""')}"`;
     };
     const headers = ['supplierName', 'awardAmount', 'awardId', 'awardingAgency', 'description', 'startDate', 'endDate', 'performanceState', 'naics', 'supplierUei', 'source', 'sourceRecordId', 'sourceUrl', 'retrievedAt', 'sourcePayloadJson'];
@@ -1159,12 +1159,12 @@ app.get('/orders/:id/download', requireAuth, async (req, res) => {
       ];
       return values.map(csvCell).join(',');
     });
-    const csv = [headers.map(csvCell).join(','), ...rows].join('\\r\\n');
+    const csv = [headers.map(csvCell).join(','), ...rows].join('\r\n');
     const safeName = order.dataset.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'dataset';
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${safeName}-${order.id}.csv"`);
     res.setHeader('Cache-Control', 'private, no-store');
-    return res.status(200).send('\\uFEFF' + csv);
+    return res.status(200).send('\uFEFF' + csv);
   } catch (error) {
     console.error('Paid dataset download failed', error);
     return res.status(500).json({ error: 'Unable to prepare the purchased dataset download.' });
