@@ -1129,14 +1129,18 @@ app.get('/orders/checkout-session/:sessionId', requireAuth, async (req, res) => 
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     const orderId = session.metadata?.orderId;
-    if (session.mode !== 'payment' || session.metadata?.buyerId !== user.id || !orderId) {
+    if (session.mode !== 'payment' || session.metadata?.buyerId !== user.id || !orderId || session.client_reference_id !== orderId) {
       return res.status(404).json({ error: 'Checkout session not found for this account.' });
     }
     const order = await prisma.order.findFirst({
       where: { id: orderId, buyerId: user.id },
-      select: { id: true, status: true, totalCents: true, currency: true },
+      select: { id: true, datasetId: true, status: true, totalCents: true, currency: true },
     });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    if (!order || session.metadata?.datasetId !== order.datasetId ||
+        session.amount_total !== order.totalCents ||
+        session.currency?.toLowerCase() !== order.currency.toLowerCase()) {
+      return res.status(404).json({ error: 'Checkout session does not match this order.' });
+    }
     return res.json({
       orderId: order.id,
       status: order.status.toLowerCase(),
@@ -1192,7 +1196,7 @@ app.get('/orders/:id/download', requireAuth, async (req, res) => {
       const values = [
         record.supplierName,
         record.awardAmount?.toString() ?? payload.awardAmount,
-        record.sourceRecordId,
+        payload.awardId ?? payload.generated_internal_id ?? record.sourceRecordId,
         payload.awardingAgency,
         payload.description,
         payload.startDate,
