@@ -402,7 +402,9 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
         'source_url', 'retrieved_at', ...payloadFields,
       ];
       const csvCell = (value: unknown) => {
-        const text = value === null || value === undefined ? '' : String(value);
+        let text = value === null || value === undefined ? '' : String(value);
+        // Prevent spreadsheet formula execution when buyers open exported CSV files.
+        if (/^[\\s]*[=+\\-@]/.test(text)) text = `'${text}`;
         return '"' + text.replace(/"/g, '""') + '"';
       };
       const rows = records.map((record) => {
