@@ -1005,7 +1005,12 @@ app.post('/orders', requireAuth, async (req, res) => {
     }
     if (dataset.sellerId === user.id) return res.status(400).json({ error: 'You cannot purchase your own dataset.' });
 
-    const order = await prisma.order.create({
+    // Reuse a pending order so client retries cannot create duplicate Stripe sessions.
+    const existingPendingOrder = await prisma.order.findFirst({
+      where: { buyerId: user.id, datasetId: dataset.id, status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+    });
+    const order = existingPendingOrder ?? await prisma.order.create({
       data: {
         buyerId: user.id,
         datasetId: dataset.id,
@@ -1023,7 +1028,7 @@ app.post('/orders', requireAuth, async (req, res) => {
           quantity: 1,
           price_data: {
             currency: 'usd',
-            unit_amount: dataset.priceCents,
+            unit_amount: order.totalCents,
             product_data: {
               name: dataset.title.slice(0, 250),
               description: dataset.description.slice(0, 500),
@@ -1034,11 +1039,11 @@ app.post('/orders', requireAuth, async (req, res) => {
         metadata: { orderId: order.id, datasetId: dataset.id, buyerId: user.id },
         success_url: `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${baseUrl}/?checkout=cancelled`,
-      });
+      }, { idempotencyKey: `marketplace-order-${order.id}` });
       if (!session.url) throw new Error('Stripe did not return a Checkout URL.');
       return res.status(201).json({ orderId: order.id, checkoutUrl: session.url, status: 'pending' });
     } catch (stripeError) {
-      await prisma.order.updateMany({ where: { id: order.id, status: 'PENDING' }, data: { status: 'FAILED' } });
+      // Keep the order PENDING so a retry can reuse the same Stripe idempotency key.
       throw stripeError;
     }
   } catch (error) {
@@ -1165,7 +1170,11 @@ app.get('/orders/:id/download', requireAuth, async (req, res) => {
       include: { dataset: true },
     });
     if (!order) return res.status(404).json({ error: 'A paid order for this account was not found.' });
-    if (order.dataset.status !== 'PUBLISHED' || order.dataset.licenseType === 'RESTRICTED' || !order.dataset.tags.includes('factory:v1')) {
+    if (order.dataset.status !== 'PUBLISHED' ||
+        order.dataset.licenseType === 'RESTRICTED' ||
+        !order.dataset.tags.includes('factory:v1') ||
+        !order.dataset.tags.includes('license-review-status:seller_reviewed') ||
+        !order.dataset.tags.some((tag) => tag.startsWith('license-review-evidence:'))) {
       return res.status(409).json({ error: 'This purchased listing is not approved for automated file delivery.' });
     }
     const recordIds = order.dataset.tags
