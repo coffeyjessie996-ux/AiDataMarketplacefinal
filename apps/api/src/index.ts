@@ -1032,7 +1032,7 @@ app.post('/orders', requireAuth, async (req, res) => {
         }],
         client_reference_id: order.id,
         metadata: { orderId: order.id, datasetId: dataset.id, buyerId: user.id },
-        success_url: `${baseUrl}/checkout/success?order_id=${encodeURIComponent(order.id)}&session_id={CHECKOUT_SESSION_ID}`,
+        success_url: `${baseUrl}/dashboard?checkout=success&order_id=${encodeURIComponent(order.id)}&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${baseUrl}/marketplace?checkout=cancelled`,
       });
       if (!session.url) throw new Error('Stripe did not return a Checkout URL.');
