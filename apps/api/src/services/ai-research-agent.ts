@@ -31,11 +31,39 @@ export async function analyzePublicResearchRecord(
   },
 ): Promise<AiResearchAnalysis> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured.');
-
   const sourcePayload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
     ? record.payload as Record<string, unknown>
     : {};
+
+  // No-cost fallback: use only saved public-record fields; never infer buyer intent or revenue.
+  const deterministicAnalysis = (): AiResearchAnalysis => {
+    const amount = Number(record.awardAmount ?? 0);
+    const hasSupplier = Boolean(record.supplierName?.trim());
+    const hasSourceUrl = /^https?:\\/\\//i.test(record.sourceUrl);
+    const hasDescription = ['description', 'Description', 'awardDescription'].some((key) =>
+      typeof sourcePayload[key] === 'string' && String(sourcePayload[key]).trim().length > 20
+    );
+    const missingInformation = [
+      !hasSupplier ? 'Supplier or recipient name' : '',
+      !hasSourceUrl ? 'Working source record URL' : '',
+      !hasDescription ? 'Detailed award or business description' : '',
+      !record.awardAmount ? 'Award amount' : '',
+    ].filter(Boolean).slice(0, 6);
+    const fitScore = Math.min(100, 20 + (hasSupplier ? 25 : 0) + (hasSourceUrl ? 20 : 0) + (hasDescription ? 20 : 0) + (amount > 0 ? 15 : 0));
+    return {
+      summary: hasSupplier
+        ? `Public ${record.source} record for ${record.supplierName}; award amount ${record.awardAmount ?? 'not supplied'}.`
+        : `Public ${record.source} record ${record.sourceRecordId}; supplier name is not supplied.`,
+      category: /sam|solicitation|opportunity/i.test(record.source) ? 'government_opportunity' : /usa|award/i.test(record.source) ? 'supplier_award' : 'other_public_research',
+      fitScore,
+      fitRationale: `Rules-based completeness score (${fitScore}/100) from supplier name, source URL, description, and award amount. This is not supplier verification, buyer intent, or a sales forecast.`,
+      missingInformation,
+      nextStep: missingInformation.length
+        ? 'Verify the missing fields against the original public source before considering outreach.'
+        : 'Review the original public source and independently verify current supplier details before outreach.',
+    };
+  };
+  if (!apiKey) return deterministicAnalysis();
 
   // Send only public source fields and cap the payload size to control cost.
   const evidence = JSON.stringify({
@@ -82,6 +110,7 @@ export async function analyzePublicResearchRecord(
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
+    if (response.status === 429 || /insufficient_quota|no credits remaining/i.test(errorBody)) return deterministicAnalysis();
     throw new Error(`OpenAI returned HTTP ${response.status}: ${errorBody.slice(0, 250)}`);
   }
 
