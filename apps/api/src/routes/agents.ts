@@ -49,11 +49,11 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
         tasks,
         summary: { running, completedToday, failedToday },
         aiAgents: {
-          enabled: Boolean(process.env.OPENAI_API_KEY),
-          status: process.env.OPENAI_API_KEY ? 'configured' : 'not_configured',
+          enabled: true,
+          status: process.env.OPENAI_API_KEY ? 'ai_with_rules_fallback' : 'rules_fallback',
           note: process.env.OPENAI_API_KEY
-            ? 'The OpenAI research analyst is configured to analyze up to three new Data Bank records per daily run. It performs research triage only and does not send outreach.'
-            : 'The feed tracks real collection automations. Add OPENAI_API_KEY to the API production environment to enable the scheduled research analyst.',
+            ? 'Research triage uses OpenAI when available and automatically falls back to transparent no-cost rules if the API quota is exhausted. It does not verify suppliers or send outreach.'
+            : 'No-cost rules-based research triage is available without OpenAI credits. It scores public-record completeness only; it does not verify suppliers or send outreach.',
         },
         pollingIntervalMs: 5000,
       });
