@@ -21,7 +21,9 @@ export default function CheckoutSuccessPage() {
   useEffect(() => {
     let cancelled = false;
     const verify = async () => {
-      const sessionId = new URLSearchParams(window.location.search).get('session_id');
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session_id');
+      const expectedOrderId = params.get('order_id');
       const token = localStorage.getItem('auth_token');
       if (!sessionId) {
         setError('The Checkout session reference is missing. Open your order history or contact support.');
@@ -34,6 +36,7 @@ export default function CheckoutSuccessPage() {
         return;
       }
 
+      let latestStatus = '';
       for (let attempt = 0; attempt < 15 && !cancelled; attempt += 1) {
         try {
           const response = await fetch(`${API}/orders/checkout-session/${encodeURIComponent(sessionId)}`, {
@@ -42,7 +45,9 @@ export default function CheckoutSuccessPage() {
           });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.error || 'Unable to verify this checkout.');
+          if (expectedOrderId && data.orderId !== expectedOrderId) throw new Error('The payment session does not match this order.');
           if (cancelled) return;
+          latestStatus = data.status;
           setOrder(data as OrderState);
           if (data.status === 'paid') {
             setMessage('Payment confirmed. Your purchased dataset is ready.');
@@ -63,7 +68,7 @@ export default function CheckoutSuccessPage() {
         }
         await new Promise(resolve => window.setTimeout(resolve, 2000));
       }
-      if (!cancelled && order?.status !== 'paid') {
+      if (!cancelled && latestStatus !== 'paid' && latestStatus !== 'failed') {
         setMessage('Payment confirmation is taking longer than usual. Refresh this page in a moment; downloads unlock only after confirmation.');
       }
     };
@@ -90,10 +95,12 @@ export default function CheckoutSuccessPage() {
         throw new Error(data.error || 'Download is not available yet.');
       }
       const blob = await response.blob();
+      const disposition = response.headers.get('content-disposition') || '';
+      const filename = disposition.match(/filename="([^"]+)"/i)?.[1] || 'purchased-dataset.csv';
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = 'purchased-dataset.csv';
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       link.remove();
