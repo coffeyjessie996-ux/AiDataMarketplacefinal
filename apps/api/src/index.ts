@@ -965,59 +965,6 @@ app.get('/orders/checkout-session/:sessionId', requireAuth, async (req, res) => 
   }
 });
 
-app.get('/orders/:id/download', requireAuth, async (req, res) => {
-  const user = (req as express.Request & { user?: User }).user;
-  if (!user) return res.status(401).json({ error: 'Authentication required.' });
-  try {
-    const order = await prisma.order.findUnique({
-      where: { id: String(req.params.id) },
-      include: { dataset: { select: { id: true, title: true, sellerId: true, status: true, licenseType: true, tags: true } } },
-    });
-    if (!order || order.buyerId !== user.id) return res.status(404).json({ error: 'Paid order not found for this account.' });
-    if (order.status !== 'PAID') return res.status(403).json({ error: 'The download unlocks only after Stripe confirms payment.' });
-    if (order.dataset.status !== 'PUBLISHED' || order.dataset.licenseType === 'RESTRICTED' || !order.dataset.tags.includes('factory:v1')) {
-      return res.status(409).json({ error: 'This dataset is not currently approved for delivery.' });
-    }
-    const recordIds = order.dataset.tags
-      .filter((tag) => tag.startsWith('source-record-id:'))
-      .map((tag) => tag.slice('source-record-id:'.length))
-      .filter(Boolean);
-    if (recordIds.length === 0) return res.status(409).json({ error: 'No source records are attached to this dataset.' });
-
-    const records = await prisma.supplierResearchRecord.findMany({
-      where: { id: { in: recordIds } },
-      orderBy: [{ retrievedAt: 'desc' }, { createdAt: 'desc' }],
-      select: { source: true, sourceRecordId: true, supplierName: true, awardAmount: true, sourceUrl: true, payload: true, retrievedAt: true },
-    });
-    if (records.length !== recordIds.length) return res.status(409).json({ error: 'Some source records are no longer available; contact support.' });
-
-    const payloadFields = ['title', 'description', 'awardingAgency', 'awardId', 'noticeId', 'naics', 'supplierUei', 'startDate', 'endDate', 'postedDate', 'responseDeadline'];
-    const headers = ['source', 'source_record_id', 'supplier_name', 'award_amount_usd', 'source_url', 'retrieved_at', ...payloadFields];
-    const csvCell = (value: unknown) => {
-      const text = value === null || value === undefined ? '' : String(value);
-      return '"' + text.replace(/"/g, '""') + '"';
-    };
-    const rows = records.map((record) => {
-      const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
-        ? record.payload as Record<string, unknown>
-        : {};
-      return [
-        record.source, record.sourceRecordId, record.supplierName, record.awardAmount?.toString() ?? '',
-        record.sourceUrl, record.retrievedAt.toISOString(), ...payloadFields.map((field) => payload[field]),
-      ].map(csvCell).join(',');
-    });
-    const csv = [headers.map(csvCell).join(','), ...rows].join('\\r\\n');
-    const safeName = order.dataset.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'dataset';
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.csv"`);
-    res.setHeader('Cache-Control', 'private, no-store');
-    return res.status(200).send(csv);
-  } catch (error) {
-    console.error('Paid dataset download failed', error);
-    return res.status(500).json({ error: 'Unable to prepare this dataset download.' });
-  }
-});
-
 app.get('/orders/:id', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
   if (!user) return res.status(401).json({ error: 'Authentication required.' });
