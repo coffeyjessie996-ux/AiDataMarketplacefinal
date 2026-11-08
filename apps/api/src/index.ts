@@ -926,6 +926,35 @@ const stripeClient = () => {
 };
 
 // Stripe Checkout is gated until secure dataset delivery and its end-to-end tests are verified.
+app.get('/orders/:id', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: String(req.params.id) },
+      include: { dataset: { select: { id: true, title: true, sellerId: true, tags: true } } },
+    });
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    if (order.buyerId !== user.id && order.dataset.sellerId !== user.id && user.role !== 'admin') {
+      return res.status(403).json({ error: 'You are not allowed to view this order.' });
+    }
+    return res.json({
+      order: {
+        id: order.id,
+        status: order.status.toLowerCase(),
+        totalCents: order.totalCents,
+        currency: order.currency,
+        datasetId: order.datasetId,
+        datasetTitle: order.dataset.title,
+        downloadAvailable: order.status === 'PAID' && order.dataset.tags.includes('factory:v1'),
+      },
+    });
+  } catch (error) {
+    console.error('Order status lookup failed', error);
+    return res.status(500).json({ error: 'Unable to load order status.' });
+  }
+});
+
 app.post('/orders', requireAuth, async (req, res) => {
   const parsed = z.object({ datasetId: z.string().min(1).max(128) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'A valid datasetId is required.' });
