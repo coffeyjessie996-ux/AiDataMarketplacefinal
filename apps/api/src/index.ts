@@ -926,45 +926,6 @@ const stripeClient = () => {
 };
 
 // Stripe Checkout is gated until secure dataset delivery and its end-to-end tests are verified.
-app.get('/orders/checkout-session/:sessionId', requireAuth, async (req, res) => {
-  const user = (req as express.Request & { user?: User }).user;
-  if (!user) return res.status(401).json({ error: 'Authentication required.' });
-  const stripe = stripeClient();
-  if (!stripe) return res.status(503).json({ error: 'Stripe is not configured on the server.' });
-  try {
-    const session = await stripe.checkout.sessions.retrieve(String(req.params.sessionId));
-    const orderId = session.metadata?.orderId;
-    if (!orderId || session.metadata?.buyerId !== user.id) {
-      return res.status(404).json({ error: 'Checkout session not found for this account.' });
-    }
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
-    if (!order || order.buyerId !== user.id ||
-        session.metadata?.datasetId !== order.datasetId ||
-        session.currency?.toLowerCase() !== order.currency.toLowerCase() ||
-        session.amount_total !== order.totalCents) {
-      return res.status(404).json({ error: 'Checkout session does not match an order for this account.' });
-    }
-
-    if (session.payment_status === 'paid' && order.status === 'PENDING') {
-      await prisma.order.updateMany({ where: { id: order.id, status: 'PENDING' }, data: { status: 'PAID' } });
-    } else if ((session.status === 'expired' || session.payment_status === 'unpaid') && order.status === 'PENDING' && session.status === 'expired') {
-      await prisma.order.updateMany({ where: { id: order.id, status: 'PENDING' }, data: { status: 'FAILED' } });
-    }
-
-    const current = await prisma.order.findUnique({ where: { id: order.id } });
-    return res.json({
-      orderId: order.id,
-      status: current?.status.toLowerCase() ?? 'pending',
-      paymentStatus: session.payment_status,
-      totalCents: order.totalCents,
-      currency: order.currency,
-    });
-  } catch (error) {
-    console.error('Stripe Checkout session verification failed', error);
-    return res.status(502).json({ error: 'Unable to verify this Stripe Checkout session.' });
-  }
-});
-
 app.get('/orders/:id', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
   if (!user) return res.status(401).json({ error: 'Authentication required.' });
