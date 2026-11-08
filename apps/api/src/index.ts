@@ -990,11 +990,18 @@ app.post('/orders', requireAuth, async (req, res) => {
     if (includedRecordIds.length === 0) {
       return res.status(409).json({ error: 'This listing has no attached source records and cannot be delivered.' });
     }
+    if (new Set(includedRecordIds).size !== includedRecordIds.length) {
+      return res.status(409).json({ error: 'This listing contains duplicate source references and cannot be sold yet.' });
+    }
+    if (!dataset.tags.includes('license-review-status:seller_reviewed') ||
+        !dataset.tags.some((tag) => tag.startsWith('license-review-evidence:'))) {
+      return res.status(409).json({ error: 'Seller source-rights review and evidence are required before checkout.' });
+    }
     const availableRecordCount = await prisma.supplierResearchRecord.count({
-      where: { id: { in: includedRecordIds } },
+      where: { id: { in: includedRecordIds }, source: 'usaspending.gov' },
     });
     if (availableRecordCount !== includedRecordIds.length) {
-      return res.status(409).json({ error: 'Some source records are missing; this listing cannot be sold yet.' });
+      return res.status(409).json({ error: 'This delivery currently supports only complete USAspending record sets.' });
     }
     if (dataset.sellerId === user.id) return res.status(400).json({ error: 'You cannot purchase your own dataset.' });
 
@@ -1012,7 +1019,6 @@ app.post('/orders', requireAuth, async (req, res) => {
     try {
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
-        payment_method_types: ['card'],
         line_items: [{
           quantity: 1,
           price_data: {
@@ -1076,6 +1082,10 @@ app.post('/webhooks/stripe', async (req, res) => {
 
       const order = await prisma.order.findUnique({ where: { id: orderId } });
       if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+      if (session.mode !== 'payment' || session.client_reference_id !== orderId) {
+        return res.status(400).json({ error: 'Stripe session does not match the order reference.' });
+      }
 
       if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
         if (session.payment_status !== 'paid') return res.status(200).json({ received: true, pendingPayment: true });
@@ -1151,10 +1161,15 @@ app.get('/orders/:id/download', requireAuth, async (req, res) => {
       include: { dataset: true },
     });
     if (!order) return res.status(404).json({ error: 'A paid order for this account was not found.' });
+    if (!order.dataset.tags.includes('factory:v1') || order.dataset.licenseType === 'RESTRICTED') {
+      return res.status(409).json({ error: 'This purchased listing is not approved for automated file delivery.' });
+    }
     const recordIds = order.dataset.tags
       .filter((tag) => tag.startsWith('source-record-id:'))
       .map((tag) => tag.slice('source-record-id:'.length));
-    if (recordIds.length === 0) return res.status(409).json({ error: 'The purchased listing has no attached source records.' });
+    if (recordIds.length === 0 || new Set(recordIds).size !== recordIds.length) {
+      return res.status(409).json({ error: 'The purchased listing has no valid attached source records.' });
+    }
 
     const records = await prisma.supplierResearchRecord.findMany({
       where: { id: { in: recordIds }, source: 'usaspending.gov' },
@@ -1169,7 +1184,7 @@ app.get('/orders/:id/download', requireAuth, async (req, res) => {
       if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
       return `"${text.replace(/"/g, '""')}"`;
     };
-    const headers = ['supplierName', 'awardAmount', 'awardId', 'awardingAgency', 'description', 'startDate', 'endDate', 'performanceState', 'naics', 'supplierUei', 'source', 'sourceRecordId', 'sourceUrl', 'retrievedAt', 'sourcePayloadJson'];
+    const headers = ['supplierName', 'awardAmount', 'awardId', 'awardingAgency', 'description', 'startDate', 'endDate', 'performanceState', 'naics', 'supplierUei', 'source', 'sourceRecordId', 'sourceUrl', 'retrievedAt'];
     const rows = records.map((record) => {
       const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
         ? record.payload as Record<string, unknown>
@@ -1189,7 +1204,6 @@ app.get('/orders/:id/download', requireAuth, async (req, res) => {
         record.sourceRecordId,
         record.sourceUrl,
         record.retrievedAt.toISOString(),
-        payload,
       ];
       return values.map(csvCell).join(',');
     });
