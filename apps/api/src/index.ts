@@ -926,6 +926,98 @@ const stripeClient = () => {
 };
 
 // Stripe Checkout is gated until secure dataset delivery and its end-to-end tests are verified.
+app.get('/orders/checkout-session/:sessionId', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  const stripe = stripeClient();
+  if (!stripe) return res.status(503).json({ error: 'Stripe is not configured on the server.' });
+  try {
+    const session = await stripe.checkout.sessions.retrieve(String(req.params.sessionId));
+    const orderId = session.metadata?.orderId;
+    if (!orderId || session.metadata?.buyerId !== user.id) {
+      return res.status(404).json({ error: 'Checkout session not found for this account.' });
+    }
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order || order.buyerId !== user.id ||
+        session.metadata?.datasetId !== order.datasetId ||
+        session.currency?.toLowerCase() !== order.currency.toLowerCase() ||
+        session.amount_total !== order.totalCents) {
+      return res.status(404).json({ error: 'Checkout session does not match an order for this account.' });
+    }
+
+    if (session.payment_status === 'paid' && order.status === 'PENDING') {
+      await prisma.order.updateMany({ where: { id: order.id, status: 'PENDING' }, data: { status: 'PAID' } });
+    } else if ((session.status === 'expired' || session.payment_status === 'unpaid') && order.status === 'PENDING' && session.status === 'expired') {
+      await prisma.order.updateMany({ where: { id: order.id, status: 'PENDING' }, data: { status: 'FAILED' } });
+    }
+
+    const current = await prisma.order.findUnique({ where: { id: order.id } });
+    return res.json({
+      orderId: order.id,
+      status: current?.status.toLowerCase() ?? 'pending',
+      paymentStatus: session.payment_status,
+      totalCents: order.totalCents,
+      currency: order.currency,
+    });
+  } catch (error) {
+    console.error('Stripe Checkout session verification failed', error);
+    return res.status(502).json({ error: 'Unable to verify this Stripe Checkout session.' });
+  }
+});
+
+app.get('/orders/:id/download', requireAuth, async (req, res) => {
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: String(req.params.id) },
+      include: { dataset: { select: { id: true, title: true, sellerId: true, status: true, licenseType: true, tags: true } } },
+    });
+    if (!order || order.buyerId !== user.id) return res.status(404).json({ error: 'Paid order not found for this account.' });
+    if (order.status !== 'PAID') return res.status(403).json({ error: 'The download unlocks only after Stripe confirms payment.' });
+    if (order.dataset.status !== 'PUBLISHED' || order.dataset.licenseType === 'RESTRICTED' || !order.dataset.tags.includes('factory:v1')) {
+      return res.status(409).json({ error: 'This dataset is not currently approved for delivery.' });
+    }
+    const recordIds = order.dataset.tags
+      .filter((tag) => tag.startsWith('source-record-id:'))
+      .map((tag) => tag.slice('source-record-id:'.length))
+      .filter(Boolean);
+    if (recordIds.length === 0) return res.status(409).json({ error: 'No source records are attached to this dataset.' });
+
+    const records = await prisma.supplierResearchRecord.findMany({
+      where: { id: { in: recordIds } },
+      orderBy: [{ retrievedAt: 'desc' }, { createdAt: 'desc' }],
+      select: { source: true, sourceRecordId: true, supplierName: true, awardAmount: true, sourceUrl: true, payload: true, retrievedAt: true },
+    });
+    if (records.length !== recordIds.length) return res.status(409).json({ error: 'Some source records are no longer available; contact support.' });
+
+    const payloadFields = ['title', 'description', 'awardingAgency', 'awardId', 'noticeId', 'naics', 'supplierUei', 'startDate', 'endDate', 'postedDate', 'responseDeadline'];
+    const headers = ['source', 'source_record_id', 'supplier_name', 'award_amount_usd', 'source_url', 'retrieved_at', ...payloadFields];
+    const csvCell = (value: unknown) => {
+      const text = value === null || value === undefined ? '' : String(value);
+      return '"' + text.replace(/"/g, '""') + '"';
+    };
+    const rows = records.map((record) => {
+      const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+        ? record.payload as Record<string, unknown>
+        : {};
+      return [
+        record.source, record.sourceRecordId, record.supplierName, record.awardAmount?.toString() ?? '',
+        record.sourceUrl, record.retrievedAt.toISOString(), ...payloadFields.map((field) => payload[field]),
+      ].map(csvCell).join(',');
+    });
+    const csv = [headers.map(csvCell).join(','), ...rows].join('\\r\\n');
+    const safeName = order.dataset.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'dataset';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.csv"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.status(200).send(csv);
+  } catch (error) {
+    console.error('Paid dataset download failed', error);
+    return res.status(500).json({ error: 'Unable to prepare this dataset download.' });
+  }
+});
+
 app.get('/orders/:id', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
   if (!user) return res.status(401).json({ error: 'Authentication required.' });
