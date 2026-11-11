@@ -4,12 +4,15 @@ const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
 };
 
-// Prefer the project's current DATABASE_URL. Keep the older pooler variables
-// as fallbacks for deployments that have not migrated their environment yet.
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  process.env.SUPABASE_POOLER_URL ??
-  process.env.POSTGRES_PRISMA_URL;
+// Prefer DATABASE_URL only when it is a usable PostgreSQL URL. A stale or
+// placeholder DATABASE_URL must not hide a valid Supabase pooler fallback.
+const databaseUrl = [
+  process.env.DATABASE_URL,
+  process.env.SUPABASE_POOLER_URL,
+  process.env.POSTGRES_PRISMA_URL,
+]
+  .map((url) => url?.trim())
+  .find((url) => url?.startsWith('postgresql://') || url?.startsWith('postgres://'));
 
 export const prisma =
   globalForPrisma.prisma ??
