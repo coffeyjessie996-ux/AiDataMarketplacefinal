@@ -4,12 +4,12 @@ const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
 };
 
-// Vercel serverless functions should use Supabase's shared transaction pooler.
-// Keep the existing variables as fallbacks for local development and legacy deployments.
+// Prefer the project's current DATABASE_URL. Keep the older pooler variables
+// as fallbacks for deployments that have not migrated their environment yet.
 const databaseUrl =
+  process.env.DATABASE_URL ??
   process.env.SUPABASE_POOLER_URL ??
-  process.env.POSTGRES_PRISMA_URL ??
-  process.env.DATABASE_URL;
+  process.env.POSTGRES_PRISMA_URL;
 
 export const prisma =
   globalForPrisma.prisma ??
