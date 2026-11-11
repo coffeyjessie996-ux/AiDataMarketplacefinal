@@ -43,12 +43,14 @@ app.use((req, _res, next) => {
 });
 
 function hasValidDatabaseUrl() {
-  const url =
-    process.env.SUPABASE_POOLER_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.DATABASE_URL ||
-    '';
-  return url.startsWith('postgresql://') || url.startsWith('postgres://');
+  const urls = [
+    process.env.DATABASE_URL,
+    process.env.SUPABASE_POOLER_URL,
+    process.env.POSTGRES_PRISMA_URL,
+  ];
+  return urls.some(
+    (url) => url?.startsWith('postgresql://') || url?.startsWith('postgres://'),
+  );
 }
 
 // Do not let a missing/invalid DATABASE_URL look like an empty, successful marketplace.
