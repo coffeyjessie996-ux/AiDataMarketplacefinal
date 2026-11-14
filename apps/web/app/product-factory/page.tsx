@@ -15,8 +15,9 @@ type ResearchRecord = {
   quality: { populatedFieldCount: number; hasSupplierName: boolean; hasSourceLink: boolean; classification: string };
 };
 
-type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; licenseStatus: string; licenseReviewNote: string; licenseEvidenceUrl: string; licenseReviewedAt: string | null; createdAt: string };
+type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; priceCents: number; licenseType: string; licenseStatus: string; licenseReviewNote: string; licenseEvidenceUrl: string; licenseReviewedAt: string | null; createdAt: string };
 type ReviewDraft = { status: 'pending' | 'seller_reviewed' | 'blocked'; note: string; evidenceUrl: string };
+type PublishDraft = { priceUsd: string; licenseType: 'COMMERCIAL' | 'PERSONAL' | 'ENTERPRISE'; rightsConfirmed: boolean; attestationNote: string };
 
 type CreatedProduct = {
   id: string;
@@ -38,6 +39,8 @@ export default function ProductFactoryPage() {
   const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
   const [savingReview, setSavingReview] = useState<string | null>(null);
+  const [publishDrafts, setPublishDrafts] = useState<Record<string, PublishDraft>>({});
+  const [publishingProduct, setPublishingProduct] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Supplier intelligence');
@@ -146,6 +149,71 @@ export default function ProductFactoryPage() {
     }
   };
 
+  const updatePublishDraft = (id: string, patch: Partial<PublishDraft>, item: SavedProduct) => {
+    setPublishDrafts(current => ({
+      ...current,
+      [id]: {
+        priceUsd: current[id]?.priceUsd ?? (item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : ''),
+        licenseType: current[id]?.licenseType ?? (item.licenseType?.toUpperCase() as PublishDraft['licenseType']) ?? 'COMMERCIAL',
+        rightsConfirmed: current[id]?.rightsConfirmed ?? false,
+        attestationNote: current[id]?.attestationNote ?? '',
+        ...patch,
+      },
+    }));
+  };
+
+  const publishProduct = async (item: SavedProduct) => {
+    const draft = publishDrafts[item.id] ?? {
+      priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : '',
+      licenseType: (item.licenseType?.toUpperCase() as PublishDraft['licenseType']) || 'COMMERCIAL',
+      rightsConfirmed: false,
+      attestationNote: '',
+    };
+    const price = Number(draft.priceUsd);
+    if (!Number.isFinite(price) || price < 1 || price > 100000) {
+      setError('Enter a listing price between $1 and $100,000.');
+      return;
+    }
+    if (item.licenseStatus !== 'seller_reviewed' || !item.licenseEvidenceUrl) {
+      setError('Save the seller source review and evidence URL before publishing.');
+      return;
+    }
+    if (!draft.rightsConfirmed || draft.attestationNote.trim().length < 20) {
+      setError('Confirm the seller rights statement and enter an attestation note of at least 20 characters.');
+      return;
+    }
+
+    setPublishingProduct(item.id);
+    setError('');
+    setNotice('');
+    try {
+      const response = await fetch(`${API}/data-bank/products/${encodeURIComponent(item.id)}/publish`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          priceCents: Math.round(price * 100),
+          licenseType: draft.licenseType,
+          rightsConfirmed: draft.rightsConfirmed,
+          attestationNote: draft.attestationNote,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not publish this product.');
+      setSavedProducts(current => current.map(product => product.id === item.id ? {
+        ...product,
+        status: 'published',
+        priceCents: data.priceCents,
+        licenseType: data.licenseType,
+      } : product));
+      setNotice(`Published ${item.title} at ${(data.priceCents / 100).toFixed(2)}. Listing slug: ${data.listing.slug}. Checkout remains subject to the platform payment switch.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not publish this product.');
+    } finally {
+      setPublishingProduct(null);
+    }
+  };
+
   useEffect(() => { void load(); }, [load]);
 
   const toggle = (id: string) => setSelected(current => current.includes(id)
@@ -194,7 +262,7 @@ export default function ProductFactoryPage() {
 
         <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16, marginBottom: 18 }}>
           <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>Saved product drafts</h2>
-          <p style={{ color: '#fbbf24', fontSize: 12, lineHeight: 1.5 }}>A seller review is an internal checklist record only. It is not legal advice or proof of permission. Products remain DRAFT, unpriced, and RESTRICTED regardless of the review status.</p>
+          <p style={{ color: '#fbbf24', fontSize: 12, lineHeight: 1.5 }}>A seller review is an internal checklist only—not legal advice or proof of permission. Publishing requires your separate price choice and explicit rights attestation.</p>
           {savedProducts.length === 0 ? <p style={{ color: '#94a3b8' }}>No product drafts have been created yet.</p> : (
             <div style={{ display: 'grid', gap: 8 }}>
               {savedProducts.map(item => {
@@ -227,6 +295,49 @@ export default function ProductFactoryPage() {
                     <button type="button" onClick={() => void saveLicensingReview(item)} disabled={savingReview === item.id || draft.note.trim().length < 10 || (draft.status === 'seller_reviewed' && !draft.evidenceUrl.trim())} style={{ padding: '8px 12px', borderRadius: 6, background: '#1d4ed8', color: 'white', border: 0 }}>{savingReview === item.id ? 'Saving…' : 'Save source review'}</button>
                     {item.licenseReviewedAt && <span style={{ color: '#94a3b8', fontSize: 11 }}>Last saved {new Date(item.licenseReviewedAt).toLocaleString()}</span>}
                   </div>
+                  {item.status === 'published' ? (
+                    <p style={{ color: '#86efac', fontSize: 13, marginTop: 12 }}>Published listing · ${(item.priceCents / 100).toFixed(2)} · {item.licenseType} license</p>
+                  ) : (
+                    <div style={{ marginTop: 14, padding: 12, border: '1px solid #475569', borderRadius: 8, background: '#111d2e' }}>
+                      <h3 style={{ margin: '0 0 8px', fontSize: 14 }}>Publish this product</h3>
+                      <p style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.5 }}>Only publish after you have checked the source terms and confirmed you have the rights to offer this dataset. Your confirmation is recorded with the listing.</p>
+                      {(() => {
+                        const publishDraft = publishDrafts[item.id] ?? {
+                          priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : '',
+                          licenseType: (item.licenseType?.toUpperCase() as PublishDraft['licenseType']) || 'COMMERCIAL',
+                          rightsConfirmed: false,
+                          attestationNote: '',
+                        };
+                        return (
+                          <>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8 }}>
+                              <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>Price (USD)
+                                <input type="number" min="1" max="100000" step="0.01" value={publishDraft.priceUsd} onChange={event => updatePublishDraft(item.id, { priceUsd: event.target.value }, item)} placeholder="e.g. 29.00" style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }} />
+                              </label>
+                              <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>Buyer license
+                                <select value={publishDraft.licenseType} onChange={event => updatePublishDraft(item.id, { licenseType: event.target.value as PublishDraft['licenseType'] }, item)} style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }}>
+                                  <option value="COMMERCIAL">Commercial</option>
+                                  <option value="PERSONAL">Personal</option>
+                                  <option value="ENTERPRISE">Enterprise</option>
+                                </select>
+                              </label>
+                            </div>
+                            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>
+                              <input type="checkbox" checked={publishDraft.rightsConfirmed} onChange={event => updatePublishDraft(item.id, { rightsConfirmed: event.target.checked }, item)} />
+                              I have reviewed the source terms and confirm I have the rights to publish and sell this dataset under the selected license.
+                            </label>
+                            <label style={{ display: 'grid', gap: 4, fontSize: 12, marginTop: 8 }}>Seller rights attestation note
+                              <textarea value={publishDraft.attestationNote} onChange={event => updatePublishDraft(item.id, { attestationNote: event.target.value }, item)} minLength={20} maxLength={1000} rows={2} placeholder="Describe the source-rights basis you checked and any limits that apply." style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }} />
+                            </label>
+                            <button type="button" onClick={() => void publishProduct(item)} disabled={publishingProduct === item.id || item.licenseStatus !== 'seller_reviewed' || !item.licenseEvidenceUrl || !publishDraft.rightsConfirmed || publishDraft.attestationNote.trim().length < 20 || Number(publishDraft.priceUsd) < 1} style={{ padding: '9px 14px', borderRadius: 6, background: '#047857', color: 'white', border: 0, marginTop: 10 }}>
+                              {publishingProduct === item.id ? 'Publishing…' : 'Publish listing'}
+                            </button>
+                            {item.licenseStatus !== 'seller_reviewed' && <p style={{ color: '#fbbf24', fontSize: 11, marginTop: 8 }}>Save the source review as “Seller reviewed” and include an HTTPS evidence URL first.</p>}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>;
               })}
             </div>
