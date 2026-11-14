@@ -90,6 +90,22 @@ export function createCronRouter(prisma: PrismaClient) {
       let saved = 0;
       let skipped = 0;
 
+      // Preserve analysis written by the AI research task when refreshing source fields.
+      // A plain payload replacement here would silently erase that analysis on every
+      // subsequent USAspending collection run.
+      const awardIds = rows
+        .map((row) => String(row['Award ID'] ?? row.award_id ?? '').trim())
+        .filter(Boolean);
+      const existingRecords = awardIds.length
+        ? await prisma.supplierResearchRecord.findMany({
+            where: { source: 'usaspending.gov', sourceRecordId: { in: awardIds } },
+            select: { sourceRecordId: true, payload: true },
+          })
+        : [];
+      const existingPayloadByAwardId = new Map(
+        existingRecords.map((existing) => [existing.sourceRecordId, existing.payload]),
+      );
+
       for (const row of rows) {
         const awardId = String(row['Award ID'] ?? row.award_id ?? '').trim();
         if (!awardId) {
@@ -121,6 +137,14 @@ export function createCronRouter(prisma: PrismaClient) {
           retrievedAt: retrievedAt.toISOString(),
         };
 
+        const previousPayload = existingPayloadByAwardId.get(awardId);
+        const previousAnalysis = previousPayload && typeof previousPayload === 'object' && !Array.isArray(previousPayload)
+          ? (previousPayload as Record<string, unknown>).aiResearchAnalysis
+          : undefined;
+        const storedPayload = previousAnalysis
+          ? { ...record, aiResearchAnalysis: previousAnalysis }
+          : record;
+
         await prisma.supplierResearchRecord.upsert({
           where: {
             source_sourceRecordId: {
@@ -134,14 +158,14 @@ export function createCronRouter(prisma: PrismaClient) {
             supplierName: typeof supplierName === 'string' ? supplierName : null,
             awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
             sourceUrl: record.sourceUrl,
-            payload: JSON.parse(JSON.stringify(record)),
+            payload: JSON.parse(JSON.stringify(storedPayload)),
             retrievedAt,
           },
           update: {
             supplierName: typeof supplierName === 'string' ? supplierName : null,
             awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
             sourceUrl: record.sourceUrl,
-            payload: JSON.parse(JSON.stringify(record)),
+            payload: JSON.parse(JSON.stringify(storedPayload)),
             retrievedAt,
           },
         });
