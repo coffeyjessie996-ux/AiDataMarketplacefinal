@@ -34,9 +34,14 @@ function isInsufficientOpenAiQuota(error: unknown): boolean {
 export function createAiResearchAgentRouter(prisma: PrismaClient) {
   const router = Router();
 
-  // Called by Vercel Cron and scheduled GitHub Actions. It is intentionally small and budget-limited:
-  // at most three new records per run, with no email or sales actions.
-  router.get('/research-enrichment', async (req, res) => {
+  // Called by Vercel Cron, scheduled GitHub Actions, and Zapier. Accept GET for existing
+  // schedules and POST for Zapier; reject all other methods. Each run is budget-limited
+  // to at most three new records, with no email or sales actions.
+  router.all('/research-enrichment', async (req, res) => {
+    if (req.method !== 'GET' && req.method !== 'POST') {
+      res.setHeader('Allow', 'GET, POST');
+      return res.status(405).json({ error: 'Method not allowed. Use GET or POST.' });
+    }
     const secret = process.env.CRON_SECRET;
     if (!secret) return res.status(503).json({ error: 'AI research agent is not configured: CRON_SECRET is missing.' });
     if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized AI research request.' });
