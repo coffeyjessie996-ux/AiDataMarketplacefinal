@@ -837,12 +837,34 @@ app.get('/research/suppliers/federal-awards', requireAuth, async (req, res) => {
       retrievedAt,
     }));
 
+    // Preserve AI analysis when a manual supplier refresh updates source evidence.
+    const sourceRecordIds = records
+      .map((record) => String(record.awardId ?? '').trim())
+      .filter(Boolean);
+    const existingResearchRecords = sourceRecordIds.length
+      ? await prisma.supplierResearchRecord.findMany({
+          where: { source: 'usaspending.gov', sourceRecordId: { in: sourceRecordIds } },
+          select: { sourceRecordId: true, payload: true },
+        })
+      : [];
+    const existingResearchPayloadById = new Map(
+      existingResearchRecords.map((existing) => [existing.sourceRecordId, existing.payload]),
+    );
+
     let persistedCount = 0;
     for (const record of records) {
       const sourceRecordId = String(record.awardId ?? '').trim();
       if (!sourceRecordId) continue;
 
       const amount = Number(record.awardAmount);
+      const previousPayload = existingResearchPayloadById.get(sourceRecordId);
+      const previousAnalysis = previousPayload && typeof previousPayload === 'object' && !Array.isArray(previousPayload)
+        ? (previousPayload as Record<string, unknown>).aiResearchAnalysis
+        : undefined;
+      const storedPayload = previousAnalysis
+        ? { ...record, aiResearchAnalysis: previousAnalysis }
+        : record;
+
       await prisma.supplierResearchRecord.upsert({
         where: {
           source_sourceRecordId: {
@@ -856,14 +878,14 @@ app.get('/research/suppliers/federal-awards', requireAuth, async (req, res) => {
           supplierName: typeof record.supplierName === 'string' ? record.supplierName : null,
           awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
           sourceUrl: String(record.sourceUrl),
-          payload: record as any,
+          payload: storedPayload as any,
           retrievedAt: new Date(retrievedAt),
         },
         update: {
           supplierName: typeof record.supplierName === 'string' ? record.supplierName : null,
           awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
           sourceUrl: String(record.sourceUrl),
-          payload: record as any,
+          payload: storedPayload as any,
           retrievedAt: new Date(retrievedAt),
         },
       });
