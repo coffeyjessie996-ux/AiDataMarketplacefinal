@@ -149,7 +149,7 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
         take: 100,
         select: {
           id: true, title: true, category: true, qualityScore: true,
-          sourceCount: true, status: true, licenseType: true, createdAt: true,
+          sourceCount: true, status: true, licenseType: true, priceCents: true, createdAt: true,
           tags: true,
         },
       });
@@ -157,7 +157,7 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
       return res.json({
         products: products.map((product) => ({
           id: product.id, title: product.title, category: product.category,
-          qualityScore: product.qualityScore, sourceCount: product.sourceCount,
+          qualityScore: product.qualityScore, sourceCount: product.sourceCount, priceCents: product.priceCents, licenseType: product.licenseType.toLowerCase(),
           recordCount: product.tags.filter((tag) => tag.startsWith('source-record-id:')).length,
           status: product.status.toLowerCase(),
           licenseStatus: readTag(product.tags, 'license-review-status:') || 'pending',
@@ -312,6 +312,100 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
     } catch (error) {
       console.error('Product licensing review save failed', error);
       return res.status(500).json({ error: 'Unable to save licensing review.' });
+    }
+  });
+
+  // Publishing requires an explicit seller attestation, saved source review, evidence URL,
+  // positive price, and a complete deliverable source-record set. AI never publishes products.
+  router.post('/products/:id/publish', async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    if (!['seller', 'admin'].includes(user.role)) return res.status(403).json({ error: 'A seller or admin account is required.' });
+
+    const schema = z.object({
+      priceCents: z.number().int().min(100).max(10_000_000),
+      licenseType: z.enum(['COMMERCIAL', 'PERSONAL', 'ENTERPRISE']),
+      rightsConfirmed: z.literal(true),
+      attestationNote: z.string().trim().min(20).max(1000),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Enter a price of at least $1, choose a license, and confirm the seller rights attestation.' });
+    }
+
+    try {
+      const product = await prisma.dataset.findFirst({
+        where: { id: String(req.params.id), sellerId: user.id, tags: { has: 'factory:v1' } },
+        select: { id: true, title: true, tags: true, status: true },
+      });
+      if (!product) return res.status(404).json({ error: 'Product draft not found.' });
+      if (product.status !== 'DRAFT') return res.status(409).json({ error: 'Only an unpublished draft can be published from this workflow.' });
+
+      const readTag = (prefix: string) => product.tags.find((tag) => tag.startsWith(prefix))?.slice(prefix.length) ?? '';
+      const evidenceUrl = readTag('license-review-evidence:');
+      if (readTag('license-review-status:') !== 'seller_reviewed' || !evidenceUrl || !/^https:\/\//i.test(decodeURIComponent(evidenceUrl))) {
+        return res.status(409).json({ error: 'Save a seller-reviewed source review with an HTTPS evidence URL before publishing.' });
+      }
+
+      const recordIds = product.tags
+        .filter((tag) => tag.startsWith('source-record-id:'))
+        .map((tag) => tag.slice('source-record-id:'.length));
+      if (!recordIds.length || new Set(recordIds).size !== recordIds.length) {
+        return res.status(409).json({ error: 'The draft must contain a non-empty, duplicate-free source record set.' });
+      }
+      const records = await prisma.supplierResearchRecord.findMany({
+        where: { id: { in: recordIds }, source: 'usaspending.gov' },
+        select: { id: true, sourceUrl: true },
+      });
+      if (records.length !== recordIds.length || records.some((record) => !record.sourceUrl.startsWith('https://'))) {
+        return res.status(409).json({ error: 'Every attached record must be available from its original HTTPS USAspending source before publication.' });
+      }
+
+      const publishedAt = new Date();
+      const attestationTags = [
+        ...product.tags.filter((tag) => !tag.startsWith('seller-rights-attestation-')),
+        'seller-rights-attestation-version:v1',
+        `seller-rights-attestation-at:${publishedAt.toISOString()}`,
+        `seller-rights-attestation-by:${user.id}`,
+        `seller-rights-attestation-note:${encodeURIComponent(parsed.data.attestationNote)}`,
+      ];
+      const slugBase = product.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 70) || 'dataset';
+      const slug = `${slugBase}-${product.id.slice(-8)}`;
+
+      const listing = await prisma.$transaction(async (tx) => {
+        const existing = await tx.listing.findFirst({ where: { datasetId: product.id } });
+        const savedListing = existing
+          ? await tx.listing.update({
+              where: { id: existing.id },
+              data: { slug, priceCents: parsed.data.priceCents, currency: 'USD', publishedAt, listingStatus: 'PUBLISHED' },
+            })
+          : await tx.listing.create({
+              data: { datasetId: product.id, slug, priceCents: parsed.data.priceCents, currency: 'USD', publishedAt, listingStatus: 'PUBLISHED' },
+            });
+        await tx.dataset.update({
+          where: { id: product.id },
+          data: {
+            priceCents: parsed.data.priceCents,
+            licenseType: parsed.data.licenseType,
+            status: 'PUBLISHED',
+            tags: attestationTags,
+          },
+        });
+        return savedListing;
+      });
+
+      return res.status(200).json({
+        published: true,
+        productId: product.id,
+        status: 'published',
+        priceCents: parsed.data.priceCents,
+        licenseType: parsed.data.licenseType.toLowerCase(),
+        listing: { id: listing.id, slug: listing.slug },
+        note: 'The seller attestation and evidence reference were recorded. This is not a legal determination of redistribution rights.',
+      });
+    } catch (error) {
+      console.error('Product Factory publish failed', error);
+      return res.status(500).json({ error: 'Unable to publish this product listing.' });
     }
   });
 
