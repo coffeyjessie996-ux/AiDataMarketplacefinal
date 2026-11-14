@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { finishAgentTask, startAgentTask } from '../services/agent-activity';
+import { upsertResearchRecordPreservingAnalysis } from '../services/research-records';
 
 const SOURCE_URL = 'https://api.usaspending.gov/api/v2/search/spending_by_award/';
 
@@ -93,19 +94,6 @@ export function createCronRouter(prisma: PrismaClient) {
       // Preserve analysis written by the AI research task when refreshing source fields.
       // A plain payload replacement here would silently erase that analysis on every
       // subsequent USAspending collection run.
-      const awardIds = rows
-        .map((row) => String(row['Award ID'] ?? row.award_id ?? '').trim())
-        .filter(Boolean);
-      const existingRecords = awardIds.length
-        ? await prisma.supplierResearchRecord.findMany({
-            where: { source: 'usaspending.gov', sourceRecordId: { in: awardIds } },
-            select: { sourceRecordId: true, payload: true },
-          })
-        : [];
-      const existingPayloadByAwardId = new Map(
-        existingRecords.map((existing) => [existing.sourceRecordId, existing.payload]),
-      );
-
       for (const row of rows) {
         const awardId = String(row['Award ID'] ?? row.award_id ?? '').trim();
         if (!awardId) {
@@ -137,37 +125,14 @@ export function createCronRouter(prisma: PrismaClient) {
           retrievedAt: retrievedAt.toISOString(),
         };
 
-        const previousPayload = existingPayloadByAwardId.get(awardId);
-        const previousAnalysis = previousPayload && typeof previousPayload === 'object' && !Array.isArray(previousPayload)
-          ? (previousPayload as Record<string, unknown>).aiResearchAnalysis
-          : undefined;
-        const storedPayload = previousAnalysis
-          ? { ...record, aiResearchAnalysis: previousAnalysis }
-          : record;
-
-        await prisma.supplierResearchRecord.upsert({
-          where: {
-            source_sourceRecordId: {
-              source: 'usaspending.gov',
-              sourceRecordId: awardId,
-            },
-          },
-          create: {
-            source: 'usaspending.gov',
-            sourceRecordId: awardId,
-            supplierName: typeof supplierName === 'string' ? supplierName : null,
-            awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
-            sourceUrl: record.sourceUrl,
-            payload: JSON.parse(JSON.stringify(storedPayload)),
-            retrievedAt,
-          },
-          update: {
-            supplierName: typeof supplierName === 'string' ? supplierName : null,
-            awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
-            sourceUrl: record.sourceUrl,
-            payload: JSON.parse(JSON.stringify(storedPayload)),
-            retrievedAt,
-          },
+        await upsertResearchRecordPreservingAnalysis(prisma, {
+          source: 'usaspending.gov',
+          sourceRecordId: awardId,
+          supplierName: typeof supplierName === 'string' ? supplierName : null,
+          awardAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
+          sourceUrl: record.sourceUrl,
+          payload: record,
+          retrievedAt,
         });
         saved += 1;
       }
@@ -227,7 +192,7 @@ export function createCronRouter(prisma: PrismaClient) {
     params.append('ptype', 'r');
 
     try {
-      const response = await fetch(`https://api.sam.gov/prod/opportunities/v2/search?${params.toString()}`, {
+      const response = await fetch(`https://api.sam.gov/opportunities/v2/search?${params.toString()}`, {
         headers: { accept: 'application/json', 'user-agent': 'AI-Data-Marketplace/1.0 (public federal opportunity research)' },
         signal: AbortSignal.timeout(20000),
       });
@@ -309,24 +274,14 @@ export function createCronRouter(prisma: PrismaClient) {
             sourceUrl,
             retrievedAt: retrievedAt.toISOString(),
           }));
-          await prisma.supplierResearchRecord.upsert({
-            where: { source_sourceRecordId: { source: 'sam.gov_opportunities', sourceRecordId: noticeId } },
-            create: {
-              source: 'sam.gov_opportunities',
-              sourceRecordId: noticeId,
-              supplierName: asText(awardee.name),
-              awardAmount: normalizedAwardAmount,
-              sourceUrl,
-              payload,
-              retrievedAt,
-            },
-            update: {
-              supplierName: asText(awardee.name),
-              awardAmount: normalizedAwardAmount,
-              sourceUrl,
-              payload,
-              retrievedAt,
-            },
+          await upsertResearchRecordPreservingAnalysis(prisma, {
+            source: 'sam.gov_opportunities',
+            sourceRecordId: noticeId,
+            supplierName: asText(awardee.name),
+            awardAmount: normalizedAwardAmount,
+            sourceUrl,
+            payload,
+            retrievedAt,
           });
           return true;
         }));
