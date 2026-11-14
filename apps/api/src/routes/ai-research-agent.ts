@@ -89,21 +89,37 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
             sourceUrl: record.sourceUrl,
             payload: record.payload,
           });
-          const existingPayload = asObject(record.payload);
-          await prisma.supplierResearchRecord.update({
+          const analysisMetadata = {
+            ...analysis,
+            analysisType: process.env.OPENAI_API_KEY ? 'AI or rules-based fallback triage - not supplier verification' : 'Rules-based no-cost triage - not supplier verification',
+            model: process.env.OPENAI_API_KEY ? (process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini; quota fallback enabled') : 'deterministic-rules-v1',
+            generatedAt: new Date().toISOString(),
+          };
+
+          // Merge the analysis into the current JSONB value in PostgreSQL. This avoids
+          // writing a stale payload snapshot over fields added by a concurrent collector.
+          const updatedRows = await prisma.$executeRaw`
+            UPDATE "SupplierResearchRecord"
+            SET
+              "payload" = COALESCE("payload", '{}'::jsonb) || jsonb_build_object(
+                'aiResearchAnalysis', ${JSON.stringify(analysisMetadata)}::jsonb
+              ),
+              "updatedAt" = NOW()
+            WHERE "id" = ${record.id}
+          `;
+          if (updatedRows !== 1) {
+            throw new Error(`AI analysis persistence updated ${updatedRows} rows; expected exactly one.`);
+          }
+
+          // Do not increment the saved counter until a fresh database read confirms it.
+          const persistedRecord = await prisma.supplierResearchRecord.findUnique({
             where: { id: record.id },
-            data: {
-              payload: JSON.parse(JSON.stringify({
-                ...existingPayload,
-                aiResearchAnalysis: {
-                  ...analysis,
-                  analysisType: process.env.OPENAI_API_KEY ? 'AI or rules-based fallback triage - not supplier verification' : 'Rules-based no-cost triage - not supplier verification',
-                  model: process.env.OPENAI_API_KEY ? (process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini; quota fallback enabled') : 'deterministic-rules-v1',
-                  generatedAt: new Date().toISOString(),
-                },
-              })),
-            },
+            select: { payload: true },
           });
+          const persistedAnalysis = asObject(persistedRecord?.payload).aiResearchAnalysis;
+          if (!persistedAnalysis || typeof persistedAnalysis !== 'object') {
+            throw new Error('AI analysis write could not be verified after database read-back.');
+          }
           saved += 1;
         } catch (error) {
           failed += 1;
