@@ -81,7 +81,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       for (const record of pending) {
         processed += 1;
         try {
-          const analysis = await analyzePublicResearchRecord({
+          const researchResult = await analyzePublicResearchRecord({
             source: record.source,
             sourceRecordId: record.sourceRecordId,
             supplierName: record.supplierName,
@@ -90,9 +90,15 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
             payload: record.payload,
           });
           const analysisMetadata = {
-            ...analysis,
-            analysisType: process.env.OPENAI_API_KEY ? 'AI or rules-based fallback triage - not supplier verification' : 'Rules-based no-cost triage - not supplier verification',
-            model: process.env.OPENAI_API_KEY ? (process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini; quota fallback enabled') : 'deterministic-rules-v1',
+            ...researchResult.analysis,
+            analysisMethod: researchResult.analysisMethod,
+            ...(researchResult.fallbackReason ? { fallbackReason: researchResult.fallbackReason } : {}),
+            analysisType: researchResult.analysisMethod === 'openai'
+              ? 'OpenAI-assisted public-record triage - not supplier verification'
+              : 'Rules-based no-cost public-record triage - not supplier verification',
+            model: researchResult.analysisMethod === 'openai'
+              ? (process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini')
+              : 'deterministic-rules-v1',
             generatedAt: new Date().toISOString(),
           };
 
