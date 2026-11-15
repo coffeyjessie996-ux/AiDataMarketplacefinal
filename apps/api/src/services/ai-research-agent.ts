@@ -11,6 +11,12 @@ const analysisSchema = z.object({
 
 export type AiResearchAnalysis = z.infer<typeof analysisSchema>;
 
+export type AiResearchResult = {
+  analysis: AiResearchAnalysis;
+  analysisMethod: 'openai' | 'rules_fallback';
+  fallbackReason?: 'missing_api_key' | 'provider_quota';
+};
+
 function extractResponseText(payload: unknown): string {
   if (!payload || typeof payload !== 'object') return '';
   const response = payload as {
@@ -29,7 +35,7 @@ export async function analyzePublicResearchRecord(
     sourceUrl: string;
     payload: unknown;
   },
-): Promise<AiResearchAnalysis> {
+): Promise<AiResearchResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   const sourcePayload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
     ? record.payload as Record<string, unknown>
@@ -63,7 +69,9 @@ export async function analyzePublicResearchRecord(
         : 'Review the original public source and independently verify current supplier details before outreach.',
     };
   };
-  if (!apiKey) return deterministicAnalysis();
+  if (!apiKey) {
+    return { analysis: deterministicAnalysis(), analysisMethod: 'rules_fallback', fallbackReason: 'missing_api_key' };
+  }
 
   // Send only public source fields and cap the payload size to control cost.
   const evidence = JSON.stringify({
@@ -110,7 +118,9 @@ export async function analyzePublicResearchRecord(
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
-    if (response.status === 429 || /insufficient_quota|no credits remaining/i.test(errorBody)) return deterministicAnalysis();
+    if (response.status === 429 || /insufficient_quota|no credits remaining/i.test(errorBody)) {
+      return { analysis: deterministicAnalysis(), analysisMethod: 'rules_fallback', fallbackReason: 'provider_quota' };
+    }
     throw new Error(`OpenAI returned HTTP ${response.status}: ${errorBody.slice(0, 250)}`);
   }
 
@@ -122,5 +132,5 @@ export async function analyzePublicResearchRecord(
   } catch {
     throw new Error('OpenAI returned invalid JSON.');
   }
-  return analysisSchema.parse(parsed);
+  return { analysis: analysisSchema.parse(parsed), analysisMethod: 'openai' };
 }
