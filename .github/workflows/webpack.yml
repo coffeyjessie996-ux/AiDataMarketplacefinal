@@ -2,7 +2,7 @@ name: Build and test marketplace
 
 on:
   push:
-    branches: ["main", "automation/**"]
+    branches: ["main", "automation/**", "test/**"]
   pull_request:
     branches: ["main"]
 
