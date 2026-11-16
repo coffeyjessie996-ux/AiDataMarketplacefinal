@@ -76,7 +76,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       const pending = candidates.filter((record) => {
         const payload = asObject(record.payload);
         return !payload.aiResearchAnalysis;
-      }).slice(0, 3);
+      }).slice(0, 5);
 
       for (const record of pending) {
         processed += 1;
@@ -143,7 +143,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       const status = processed > 0 && failed === processed ? 'FAILED' : 'COMPLETED';
       await finishAgentTask(prisma, taskId, status, {
         message: pending.length
-          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum three records are processed per daily run.`
+          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum five records are processed per run.`
           : 'AI research run checked the latest 30 records; no unanalyzed records were found.',
         recordsFetched: processed,
         recordsSaved: saved,
@@ -156,7 +156,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
         analyzed: saved,
         failed,
         blockedByQuota,
-        dailyLimit: 3,
+        perRunLimit: 5,
         note: 'AI triage is an aid to research only. It does not verify suppliers, create sales, send outreach, or count as revenue.',
       });
     } catch (error) {

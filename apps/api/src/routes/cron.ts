@@ -18,6 +18,17 @@ function authorized(requestHeader: string | undefined, secret: string): boolean 
 // handled by the same warm instance without relying on client-supplied identity headers.
 const samOpportunityRequestWindows = new Map<string, { startedAt: number; count: number }>();
 
+function safeSamResponseMessage(body: string, apiKey: string): string {
+  return body
+    .replaceAll(apiKey, '[redacted]')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/(api[_-]?key[\"'\s:=]+)[^\s,\"']+/gi, '$1[redacted]')
+    .replace(/\b[A-Za-z0-9_-]{32,}\b/g, '[redacted]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 220);
+}
+
 function allowSamOpportunityRequest(key: string, now = Date.now()): boolean {
   const windowMs = 15 * 60 * 1000;
   const maxRequests = 3;
@@ -196,11 +207,17 @@ export function createCronRouter(prisma: PrismaClient) {
         headers: { accept: 'application/json', 'user-agent': 'AI-Data-Marketplace/1.0 (public federal opportunity research)' },
         signal: AbortSignal.timeout(20000),
       });
-      if (response.status === 404) {
-        // The official Get Opportunities API documents HTTP 404 as "No Data found".
-        // Treat an empty search window as a successful zero-result collection, not an outage.
+      const responseBody = await response.text();
+      const diagnostic = safeSamResponseMessage(responseBody, apiKey);
+      const looksLikeCredentialFailure = /invalid.{0,20}(api[ -]?key|credential)|missing.{0,20}(api[ -]?key|credential)|unauthori[sz]ed|forbidden|api[ -]?key.{0,20}(invalid|missing|expired)/i.test(diagnostic);
+
+      if (response.status === 404 && !looksLikeCredentialFailure) {
+        // GSA documents HTTP 404 as "No Data found". Preserve empty-result handling,
+        // but retain a short sanitized response diagnostic for source verification.
         await finishAgentTask(prisma, taskId, 'COMPLETED', {
-          message: 'SAM.gov returned HTTP 404 (no matching opportunities for this search window).',
+          message: diagnostic
+            ? `SAM.gov returned HTTP 404 (documented no-data response): ${diagnostic}`
+            : 'SAM.gov returned HTTP 404 (documented no-data response; response body was empty).',
           recordsFetched: 0,
           recordsSaved: 0,
           recordsFailed: 0,
@@ -214,16 +231,29 @@ export function createCronRouter(prisma: PrismaClient) {
           fetched: 0,
           saved: 0,
           skipped: 0,
-          note: 'SAM.gov reported no matching opportunities for this date range and notice-type filter. This is an empty result, not a collector outage.',
+          sourceDiagnostic: diagnostic || 'No response detail supplied.',
+          note: 'SAM.gov returned its documented HTTP 404 no-data response for this search. Review the sanitized diagnostic if the result is unexpected.',
         });
       }
 
       if (!response.ok) {
-        await finishAgentTask(prisma, taskId, 'FAILED', { message: `SAM.gov returned HTTP ${response.status}.` });
-        return res.status(502).json({ error: 'SAM.gov returned an error.', sourceStatus: response.status });
+        const detail = diagnostic ? ` Detail: ${diagnostic}` : '';
+        await finishAgentTask(prisma, taskId, 'FAILED', {
+          message: `SAM.gov returned HTTP ${response.status}.${detail}`,
+          recordsFetched: 0,
+          recordsSaved: 0,
+          recordsFailed: 1,
+        });
+        return res.status(502).json({
+          error: looksLikeCredentialFailure
+            ? 'SAM.gov rejected the API credentials or authorization.'
+            : 'SAM.gov returned an error.',
+          sourceStatus: response.status,
+          sourceDiagnostic: diagnostic || 'No response detail supplied.',
+        });
       }
 
-      const result = await response.json() as {
+      const result = JSON.parse(responseBody) as {
         totalRecords?: number;
         opportunitiesData?: Array<Record<string, unknown>>;
       };
