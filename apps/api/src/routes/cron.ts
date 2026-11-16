@@ -21,10 +21,10 @@ const samOpportunityRequestWindows = new Map<string, { startedAt: number; count:
 function safeSamResponseMessage(body: string, apiKey: string): string {
   return body
     .replaceAll(apiKey, '[redacted]')
-    .replace(/Bearer\\s+\\S+/gi, 'Bearer [redacted]')
-    .replace(/(api[_-]?key[\\"'\\s:=]+)[^\\s,\\"']+/gi, '$1[redacted]')
-    .replace(/\\b[A-Za-z0-9_-]{32,}\\b/g, '[redacted]')
-    .replace(/\\s+/g, ' ')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/(api[_-]?key[\"'\s:=]+)[^\s,\"']+/gi, '$1[redacted]')
+    .replace(/\b[A-Za-z0-9_-]{32,}\b/g, '[redacted]')
+    .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 220);
 }
