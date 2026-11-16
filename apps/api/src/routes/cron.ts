@@ -341,5 +341,108 @@ export function createCronRouter(prisma: PrismaClient) {
     }
   });
 
+
+  // Daily Grants.gov opportunity refresh. Search2 is a public endpoint and
+  // does not require an API key. Only public opportunity metadata is stored;
+  // grant contacts are intentionally excluded from sales-lead generation.
+  router.get('/research/grants-opportunities', async (req, res) => {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(503).json({ error: 'Scheduled research is not configured: CRON_SECRET is missing.' });
+    if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized scheduled research request.' });
+
+    const taskId = await startAgentTask(prisma, 'Grants.gov collector', 'Collect public federal grant opportunities');
+    const retrievedAt = new Date();
+    const allRows: Array<Record<string, unknown>> = [];
+    let hitCount = 0;
+
+    try {
+      for (const startRecordNum of [0, 100]) {
+        const response = await fetch('https://api.grants.gov/v1/api/search2', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          signal: AbortSignal.timeout(20000),
+          body: JSON.stringify({
+            rows: 100,
+            startRecordNum,
+            keyword: '',
+            oppStatuses: 'forecasted|posted',
+          }),
+        });
+        if (!response.ok) {
+          await finishAgentTask(prisma, taskId, 'FAILED', { message: `Grants.gov returned HTTP ${response.status}.`, recordsFailed: 1 });
+          return res.status(502).json({ error: 'Grants.gov returned an error.', sourceStatus: response.status });
+        }
+        const body = await response.json() as {
+          errorcode?: number | string;
+          msg?: string;
+          data?: { hitCount?: number; oppHits?: Array<Record<string, unknown>> };
+        };
+        if (Number(body.errorcode) !== 0 || !body.data || !Array.isArray(body.data.oppHits)) {
+          await finishAgentTask(prisma, taskId, 'FAILED', { message: 'Grants.gov search response did not contain a successful opportunity result.' });
+          return res.status(502).json({ error: 'Grants.gov returned an invalid or unsuccessful search response.' });
+        }
+        hitCount = Number(body.data.hitCount ?? 0);
+        allRows.push(...body.data.oppHits);
+        if (startRecordNum === 0 && (hitCount <= 100 || body.data.oppHits.length < 100)) break;
+      }
+
+      let saved = 0;
+      let skipped = 0;
+      for (const row of allRows) {
+        const id = typeof row.id === 'string' || typeof row.id === 'number' ? String(row.id).trim() : '';
+        if (!id) { skipped += 1; continue; }
+        const asText = (value: unknown): string | null =>
+          typeof value === 'string' && value.trim() ? value.trim() : null;
+        const title = asText(row.title);
+        const opportunityNumber = asText(row.number);
+        const sourceUrl = `https://www.grants.gov/search-results-detail/${encodeURIComponent(id)}`;
+        const payload = JSON.parse(JSON.stringify({
+          recordType: 'federal_grant_opportunity',
+          opportunityId: id,
+          opportunityNumber,
+          title,
+          agencyCode: asText(row.agencyCode),
+          agencyName: asText(row.agencyName ?? row.agency),
+          openDate: asText(row.openDate),
+          closeDate: asText(row.closeDate),
+          status: asText(row.oppStatus),
+          documentType: asText(row.docType),
+          assistanceListingNumbers: Array.isArray(row.alnist) ? row.alnist.filter((value): value is string => typeof value === 'string') : [],
+          sourceUrl,
+          retrievedAt: retrievedAt.toISOString(),
+        }));
+        await upsertResearchRecordPreservingAnalysis(prisma, {
+          source: 'grants.gov_opportunities',
+          sourceRecordId: id,
+          supplierName: null,
+          awardAmount: null,
+          sourceUrl,
+          payload,
+          retrievedAt,
+        });
+        saved += 1;
+      }
+
+      await finishAgentTask(prisma, taskId, 'COMPLETED', {
+        message: `Grants.gov collection completed: ${saved} opportunity records saved, ${skipped} skipped.`,
+        recordsFetched: allRows.length, recordsSaved: saved, recordsFailed: skipped,
+      });
+      return res.json({
+        ok: true,
+        source: 'Grants.gov Search2 API',
+        retrievedAt: retrievedAt.toISOString(),
+        totalMatchingOpportunities: hitCount,
+        fetched: allRows.length,
+        saved,
+        skipped,
+        note: 'Public forecasted and posted grant opportunity metadata. Search results do not establish eligibility, award probability, grant approval, or marketplace revenue. Buyers should verify each notice and its application requirements on Grants.gov.',
+      });
+    } catch (error) {
+      await finishAgentTask(prisma, taskId, 'FAILED', { message: 'Grants.gov collection failed before completion.' });
+      console.error('Scheduled Grants.gov refresh failed', error);
+      return res.status(502).json({ error: 'Scheduled Grants.gov opportunity refresh failed.' });
+    }
+  });
+
   return router;
 }
