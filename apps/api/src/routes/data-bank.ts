@@ -118,8 +118,10 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
             hasSupplierName: Boolean(record.supplierName?.trim()),
             hasSourceLink: Boolean(record.sourceUrl),
             classification: record.source === 'sam.gov_opportunities'
-              ? 'Government opportunity research'
-              : 'Public supplier / award research',
+              ? 'Government contract opportunity research'
+              : record.source === 'grants.gov_opportunities'
+                ? 'Federal grant opportunity research'
+                : 'Public supplier / award research',
           },
         };
       });

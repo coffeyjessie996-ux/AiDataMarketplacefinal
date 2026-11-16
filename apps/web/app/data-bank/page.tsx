@@ -99,7 +99,9 @@ export default function DataBankPage() {
     ? 'USAspending.gov'
     : value === 'sam.gov_opportunities'
       ? 'SAM.gov opportunities'
-      : value.replaceAll('_', ' ');
+      : value === 'grants.gov_opportunities'
+        ? 'Grants.gov opportunities'
+        : value.replaceAll('_', ' ');
 
   return (
     <main style={{ minHeight: '100vh', padding: '28px 18px', background: '#0b1220', color: '#e5edf8' }}>
