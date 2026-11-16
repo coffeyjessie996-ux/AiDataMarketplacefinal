@@ -36,6 +36,10 @@
       "schedule": "15 0 * * *"
     },
     {
+      "path": "/api/cron/research/grants-opportunities",
+      "schedule": "45 0 * * *"
+    },
+    {
       "path": "/api/cron/ai/research-enrichment",
       "schedule": "30 0 * * *"
     }
