@@ -15,7 +15,7 @@ function sectionBetween(start, end) {
 const checkout = sectionBetween("app.post('/orders'", "// Stripe alone can confirm payment.");
 const webhook = sectionBetween("app.post('/webhooks/stripe'", "// A buyer can check the server-side order state");
 const statusLookup = sectionBetween("app.get('/orders/checkout-session/:sessionId'", "// Dataset delivery is generated");
-const download = sectionBetween("app.get('/orders/:id/download'", "app.get('/");
+const download = sectionBetween("app.get('/orders/:id/download'", "// Public marketplace figures come from persisted database records only.");
 
 test('checkout is disabled unless the explicit server-side flag is true', () => {
   assert.match(checkout, /STRIPE_CHECKOUT_ENABLED !== 'true'/);
