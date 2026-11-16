@@ -12,10 +12,18 @@ function sectionBetween(start, end) {
   return apiSource.slice(startAt, endAt);
 }
 
+const stripeConfig = sectionBetween('const stripeClient = () => {', '// Stripe Checkout is gated');
 const checkout = sectionBetween("app.post('/orders'", "// Stripe alone can confirm payment.");
 const webhook = sectionBetween("app.post('/webhooks/stripe'", "// A buyer can check the server-side order state");
 const statusLookup = sectionBetween("app.get('/orders/checkout-session/:sessionId'", "// Dataset delivery is generated");
 const download = sectionBetween("app.get('/orders/:id/download'", "// Public marketplace figures come from persisted database records only.");
+
+test('Preview deployments require a dedicated Stripe test key and cannot fall back to the live key', () => {
+  assert.match(stripeConfig, /VERCEL_ENV === 'preview'/);
+  assert.match(stripeConfig, /STRIPE_TEST_SECRET_KEY/);
+  assert.match(stripeConfig, /isPreview && !secretKey\.startsWith\('sk_test_'\)/);
+  assert.match(stripeConfig, /VERCEL_ENV === 'production'.*sk_live_/s);
+});
 
 test('checkout is disabled unless the explicit server-side flag is true', () => {
   assert.match(checkout, /STRIPE_CHECKOUT_ENABLED !== 'true'/);
