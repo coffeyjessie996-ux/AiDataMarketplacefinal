@@ -928,7 +928,7 @@ const stripeClient = () => {
   // to the Production STRIPE_SECRET_KEY in an isolated checkout test.
   const isPreview = process.env.VERCEL_ENV === 'preview';
   const secretKey = isPreview
-    ? process.env.STRIPE_TEST_SECRET_KEY
+    ? process.env.STRIPE_SECRET_TEST_KEY
     : process.env.STRIPE_SECRET_KEY;
   if (!secretKey) return null;
   if (isPreview && !secretKey.startsWith('sk_test_')) return null;
