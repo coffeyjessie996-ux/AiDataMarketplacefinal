@@ -924,8 +924,15 @@ app.post('/wallet/payout', requireAuth, async (_req, res) => {
 });
 
 const stripeClient = () => {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
+  // Preview deployments must use a dedicated test-mode key; never fall back
+  // to the Production STRIPE_SECRET_KEY in an isolated checkout test.
+  const isPreview = process.env.VERCEL_ENV === 'preview';
+  const secretKey = isPreview
+    ? process.env.STRIPE_TEST_SECRET_KEY
+    : process.env.STRIPE_SECRET_KEY;
   if (!secretKey) return null;
+  if (isPreview && !secretKey.startsWith('sk_test_')) return null;
+  if (process.env.VERCEL_ENV === 'production' && !secretKey.startsWith('sk_live_')) return null;
   return new Stripe(secretKey);
 };
 
