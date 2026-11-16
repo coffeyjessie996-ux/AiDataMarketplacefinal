@@ -50,7 +50,7 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
     });
   });
 
-  router.get('/oauth/start', auth, async (req, res) => {
+  router.post('/oauth/start', auth, async (req, res) => {
     const user = (req as AuthReq).user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
     const settings = config();
@@ -73,7 +73,7 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
     url.searchParams.set('include_granted_scopes', 'true');
     url.searchParams.set('login_hint', settings.senderEmail);
     url.searchParams.set('state', rawState);
-    return res.redirect(302, url.toString());
+    return res.json({ authorizationUrl: url.toString() });
   });
 
   // Public callback: one-time random state is bound to the signed-in owner and expires after 10 minutes.
