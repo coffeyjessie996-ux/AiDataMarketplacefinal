@@ -20,7 +20,7 @@ const download = sectionBetween("app.get('/orders/:id/download'", "// Public mar
 
 test('Preview deployments require a dedicated Stripe test key and cannot fall back to the live key', () => {
   assert.match(stripeConfig, /VERCEL_ENV === 'preview'/);
-  assert.match(stripeConfig, /STRIPE_TEST_SECRET_KEY/);
+  assert.match(stripeConfig, /STRIPE_SECRET_TEST_KEY/);
   assert.match(stripeConfig, /isPreview && !secretKey\.startsWith\('sk_test_'\)/);
   assert.match(stripeConfig, /VERCEL_ENV === 'production'.*sk_live_/s);
 });
