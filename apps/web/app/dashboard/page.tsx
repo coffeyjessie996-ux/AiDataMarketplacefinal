@@ -692,7 +692,7 @@ const startScrapers = async () => {
       throw new Error(data.error || 'Scraper failed.');
     }
 
-    setScraperMessage(`Saved ${data.count} public page snapshot(s). This does not run USAspending, SAM.gov, or Grants.gov collectors.`);
+    setScraperMessage(`Saved ${Number(data.saved || 0)} public page snapshot(s). This does not run USAspending, SAM.gov, or Grants.gov collectors.`);
   } catch (error) {
     setScraperMessage(
       error instanceof Error ? error.message : 'Scraper failed.'
