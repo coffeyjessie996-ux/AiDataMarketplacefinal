@@ -121,7 +121,7 @@ export default function DataBankPage() {
           <h1 style={{ fontSize: 'clamp(30px, 5vw, 44px)', margin: '8px 0 12px' }}>AI Data Bank</h1>
           <p style={{ color: '#a8b6ca', maxWidth: 800, lineHeight: 1.6 }}>
             One searchable library for research collected by connected sources. Each record keeps its original source, source ID, source link, and collection timestamps.
-          </p>
+          </p><p style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 1.5, marginTop: 14 }}>This product uses the Grants.gov API but is not endorsed or certified by the U.S. Department of Health and Human Services.</p>
         </header>
 
         {summary && <section aria-label="Data Bank summary" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12, marginBottom: 22 }}>
