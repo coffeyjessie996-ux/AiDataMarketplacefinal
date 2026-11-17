@@ -120,6 +120,7 @@ export default function HomePage() {
             </p>
             <div className="cta-row">
               <a href="#catalog" className="primary-button">Browse datasets</a>
+              <a href="/for-businesses#buyer-inquiry" className="secondary-button">Request a data preview</a>
               <a href="/dashboard" className="secondary-button">View analytics</a>
             </div>
           </div>
