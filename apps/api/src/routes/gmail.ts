@@ -55,6 +55,7 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
     const settings = config();
     if (!settings) return res.status(503).json({ error: 'Gmail OAuth is not configured. Add the five Gmail environment variables to the API deployment.' });
+    if (user.status !== 'active') return res.status(403).json({ error: 'Only active marketplace accounts can connect the sales mailbox.' });
     if (!['admin', 'seller'].includes(user.role)) return res.status(403).json({ error: 'Only marketplace administrators or sellers can connect the sales mailbox.' });
 
     const rawState = randomBytes(32).toString('hex');
@@ -96,6 +97,15 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
       data: { usedAt: new Date() },
     });
     if (consumed.count !== 1) return fail('This authorization request has already been used.');
+
+    // Re-check the account at callback time; a role or account status may have changed during consent.
+    const owner = await prisma.user.findUnique({
+      where: { id: state.userId },
+      select: { role: true, status: true },
+    });
+    if (!owner || owner.status.toLowerCase() !== 'active' || !['admin', 'seller'].includes(owner.role.toLowerCase())) {
+      return fail('This marketplace account is no longer authorized to connect the sales mailbox.');
+    }
 
     try {
       const tokenResponse = await fetch(GOOGLE_TOKEN, {
