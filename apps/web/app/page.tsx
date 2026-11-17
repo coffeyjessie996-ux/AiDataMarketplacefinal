@@ -120,8 +120,14 @@ export default function HomePage() {
             </p>
             <div className="cta-row">
               <a href="#catalog" className="primary-button">Browse datasets</a>
+              <a href="/for-businesses#buyer-inquiry" className="secondary-button">Request a data preview</a>
+              <a href="/dashboard" className="secondary-button">View analytics</a>
+            </div>            <div className="cta-row">
+              <a href="#catalog" className="primary-button">Browse datasets</a>
+              <a href="/for-businesses#buyer-inquiry" className="secondary-button">Request a data preview</a>
               <a href="/dashboard" className="secondary-button">View analytics</a>
             </div>
+            <p style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 1.5, marginTop: 14 }}>This product uses the Grants.gov API but is not endorsed or certified by the U.S. Department of Health and Human Services.</p>
           </div>
 
           <div className="stat-card">

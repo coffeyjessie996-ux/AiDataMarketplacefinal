@@ -77,9 +77,13 @@ export default function ForBusinessesPage() {
         </h1>
         <p style={{ maxWidth: 760, color: '#cbd5e1', fontSize: 'clamp(1rem, 2vw, 1.2rem)', lineHeight: 1.75, margin: '0 0 28px' }}>
           Explore business and supplier research for sourcing, sales prospecting, partner discovery, and market analysis. Start with the data that is actually available in the marketplace.
+        </p>        <p style={{ maxWidth: 760, color: '#cbd5e1', fontSize: 'clamp(1rem, 2vw, 1.2rem)', lineHeight: 1.75, margin: '0 0 28px' }}>
+          Explore business and supplier research for sourcing, sales prospecting, partner discovery, and market analysis. Start with the data that is actually available in the marketplace.
         </p>
+        <p style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 1.5, marginTop: 14 }}>This product uses the Grants.gov API but is not endorsed or certified by the U.S. Department of Health and Human Services.</p>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <a href="/#catalog" style={{ display: 'inline-flex', padding: '13px 19px', borderRadius: 9, background: 'linear-gradient(135deg,#38bdf8,#14b8a6)', color: '#04111b', fontWeight: 800, textDecoration: 'none' }}>Browse available data</a>
+          <a href="#buyer-inquiry" style={{ display: 'inline-flex', padding: '13px 19px', borderRadius: 9, border: '1px solid rgba(103,232,249,.55)', color: '#a5f3fc', fontWeight: 800, textDecoration: 'none' }}>Request a data preview</a>
           <a href="/register" style={{ display: 'inline-flex', padding: '13px 19px', borderRadius: 9, border: '1px solid rgba(148,163,184,.4)', color: '#f8fafc', fontWeight: 700, textDecoration: 'none' }}>Create buyer account</a>
         </div>
       </section>

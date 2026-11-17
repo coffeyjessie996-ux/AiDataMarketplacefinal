@@ -258,6 +258,9 @@ export default function ProductFactoryPage() {
           <p style={{ color: '#a8b6ca', maxWidth: 820, lineHeight: 1.6 }}>
             Assemble real records already saved in your Data Bank into a private product draft. Source links and collection dates are retained, and a transparent completeness score is calculated from the records.
           </p>
+          <p style={{ color: '#fbbf24', fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>
+            Grants.gov records can be used for research and private drafts. The current publish-and-delivery workflow is limited to USAspending records while Grants.gov redistribution terms are reviewed. See the <a href="https://www.grants.gov/api/terms-conditions" target="_blank" rel="noreferrer" style={{ color: '#7dd3fc' }}>official Grants.gov API terms</a> before making a resale decision.
+          </p><p style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 1.5, marginTop: 14 }}>This product uses the Grants.gov API but is not endorsed or certified by the U.S. Department of Health and Human Services.</p>
         </header>
 
         <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16, marginBottom: 18 }}>
