@@ -22,7 +22,7 @@ type ActivityResponse = {
   updatedAt: string;
   tasks: Task[];
   summary: { running: number; completedToday: number; failedToday: number };
-  aiAgents: { enabled: boolean; status: string; note: string };
+  researchAutomation: { enabled: boolean; providerConfigured: boolean; providerStatus: string; autonomousAgentsConnected: boolean; note: string };
   pollingIntervalMs: number;
 };
 
@@ -84,9 +84,9 @@ export default function AgentActivityPage() {
 
         <header style={{ marginBottom: 22 }}>
           <p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 12, fontWeight: 700 }}>OPERATIONS MONITOR</p>
-          <h1 style={{ fontSize: 'clamp(30px, 5vw, 42px)', margin: '8px 0' }}>Agent Activity Live Feed</h1>
+          <h1 style={{ fontSize: 'clamp(30px, 5vw, 42px)', margin: '8px 0' }}>Collection &amp; Research Activity</h1>
           <p style={{ color: '#a8b6ca', lineHeight: 1.6, maxWidth: 820 }}>
-            Watch real collection and scraper jobs start, complete, and report their results. This feed refreshes automatically every five seconds.
+            View actual scheduled collector runs and public-record research triage tasks. This feed refreshes automatically every five seconds; it is not a claim that autonomous multi-agent sales or research teams are connected.
           </p>
         </header>
 
@@ -105,13 +105,13 @@ export default function AgentActivityPage() {
           </div>
         </section>}
 
-        <section style={{ background: '#241b12', border: '1px solid #854d0e', borderRadius: 10, padding: 16, marginBottom: 20 }}>
+        <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, padding: 16, marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-            <strong style={{ color: data?.aiAgents.enabled ? '#86efac' : '#fcd34d' }}>{data?.aiAgents.enabled ? 'OpenAI research analyst: Configured' : 'Autonomous AI agents: Not connected'}</strong>
-            <span style={{ color: data?.aiAgents.enabled ? '#86efac' : '#fbbf24', fontSize: 12 }}>{data?.aiAgents.status || 'Checking'}</span>
+            <strong>Scheduled research triage: {data?.researchAutomation.enabled ? 'Enabled' : 'Not configured'}</strong>
+            <span style={{ color: '#93a4bd', fontSize: 12 }}>{data?.researchAutomation.providerConfigured ? 'OpenAI key configured · connectivity unverified' : 'Rules-based fallback only'}</span>
           </div>
-          <p style={{ color: '#f5d9a8', margin: '8px 0 0', lineHeight: 1.5 }}>
-            {data?.aiAgents.note || 'The current feed records real scheduled collectors and scraper jobs.'}
+          <p style={{ color: '#b8c6d9', margin: '8px 0 0', lineHeight: 1.5 }}>
+            {data?.researchAutomation.note || 'The activity feed records scheduled collectors and research triage jobs.'}
           </p>
         </section>
 
@@ -132,7 +132,7 @@ export default function AgentActivityPage() {
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
                         <strong>{task.agentName}</strong>
-                        <span style={{ fontSize: 10, letterSpacing: 1, color: task.agentType === 'ai_agent' ? '#86efac' : '#93a4bd', border: '1px solid #334155', borderRadius: 20, padding: '3px 7px' }}>{task.agentType === 'ai_agent' ? 'AI AGENT' : 'AUTOMATION'}</span>
+                        <span style={{ fontSize: 10, letterSpacing: 1, color: task.agentType === 'automation' ? '#93a4bd' : '#fbbf24', border: '1px solid #334155', borderRadius: 20, padding: '3px 7px' }}>{task.agentType === 'automation' ? 'SCHEDULED AUTOMATION' : 'RESEARCH TRIAGE'}</span>
                       </div>
                       <div style={{ color: '#cbd5e1', marginTop: 5 }}>{task.taskName}</div>
                     </div>

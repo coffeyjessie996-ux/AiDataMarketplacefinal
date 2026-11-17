@@ -48,12 +48,14 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
         updatedAt: new Date().toISOString(),
         tasks,
         summary: { running, completedToday, failedToday },
-        aiAgents: {
+        researchAutomation: {
           enabled: true,
-          status: process.env.OPENAI_API_KEY ? 'ai_with_rules_fallback' : 'rules_fallback',
+          providerConfigured: Boolean(process.env.OPENAI_API_KEY),
+          providerStatus: process.env.OPENAI_API_KEY ? 'configured_not_live_verified' : 'rules_fallback_only',
+          autonomousAgentsConnected: false,
           note: process.env.OPENAI_API_KEY
-            ? 'Research triage uses OpenAI when available and automatically falls back to transparent no-cost rules if the API quota is exhausted. It does not verify suppliers or send outreach.'
-            : 'No-cost rules-based research triage is available without OpenAI credits. It scores public-record completeness only; it does not verify suppliers or send outreach.',
+            ? 'This is a scheduled, single-step research triage job—not an autonomous multi-agent system. An OpenAI API key is configured, but provider connectivity is not verified by this activity feed. The job uses OpenAI when available and falls back to deterministic no-cost rules when the provider quota is exhausted.'
+            : 'This is a scheduled, single-step research triage job—not an autonomous multi-agent system. It currently uses deterministic no-cost rules and does not verify suppliers or send outreach.',
         },
         pollingIntervalMs: 5000,
       });
