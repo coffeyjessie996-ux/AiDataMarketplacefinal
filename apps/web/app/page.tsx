@@ -154,18 +154,18 @@ export default function HomePage() {
       <section id="automation" className="feature-grid">
         <article className="feature-card">
           <span className="feature-number">01</span>
-          <h3>Web agent discovery</h3>
-          <p>AI bots continuously find and validate high-signal data sources across the web.</p>
+          <h3>Scheduled public-data collection</h3>
+          <p>Scheduled collectors retrieve public records from configured sources. Separate research triage summarizes selected records; it does not verify suppliers or create sales automatically.</p>
         </article>
         <article className="feature-card">
           <span className="feature-number">02</span>
-          <h3>Cleaning + quality scoring</h3>
-          <p>Normalize, deduplicate, and enrich raw records before pricing and publishing.</p>
+          <h3>Research quality review</h3>
+          <p>Normalize and deduplicate saved records, preserve source links, and review completeness before a seller prepares a product.</p>
         </article>
         <article className="feature-card">
           <span className="feature-number">03</span>
-          <h3>Marketplace monetization</h3>
-          <p>Sell premium data products with a built-in wallet, payouts, and revenue tracking.</p>
+          <h3>Marketplace product preparation</h3>
+          <p>Prepare source-reviewed listings and track paid orders. Checkout and payout transfers remain disabled until separately enabled and verified.</p>
         </article>
       </section>
 
