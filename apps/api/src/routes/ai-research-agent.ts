@@ -36,7 +36,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
 
   // Called by Vercel Cron, scheduled GitHub Actions, and Zapier. Accept GET for existing
   // schedules and POST for Zapier; reject all other methods. Each run is budget-limited
-  // to at most three new records, with no email or sales actions.
+  // to at most ten new records, with no email or sales actions.
   router.all('/research-enrichment', async (req, res) => {
     if (req.method !== 'GET' && req.method !== 'POST') {
       res.setHeader('Allow', 'GET, POST');
@@ -76,7 +76,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       const pending = candidates.filter((record) => {
         const payload = asObject(record.payload);
         return !payload.aiResearchAnalysis;
-      }).slice(0, 5);
+      }).slice(0, 10);
 
       for (const record of pending) {
         processed += 1;
@@ -143,7 +143,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       const status = processed > 0 && failed === processed ? 'FAILED' : 'COMPLETED';
       await finishAgentTask(prisma, taskId, status, {
         message: pending.length
-          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum five records are processed per run.`
+          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum ten records are processed per run.`
           : 'AI research run checked the latest 30 records; no unanalyzed records were found.',
         recordsFetched: processed,
         recordsSaved: saved,

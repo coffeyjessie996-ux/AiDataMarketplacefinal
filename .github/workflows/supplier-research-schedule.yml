@@ -5,8 +5,8 @@ on:
     # Vercel Hobby handles one daily run; GitHub Actions supplies the other three.
     - cron: '0 6,12,18 * * *'
     - cron: '15 6,12,18 * * *'
-    # The daily Vercel run is at 00:30 UTC; this adds the second AI run 12 hours later.
-    - cron: '30 12 * * *'
+    # Vercel runs at 00:30 UTC. GitHub Actions adds five cost-conscious enrichment runs daily.
+    - cron: '30 4,8,12,16,20 * * *'
 
 permissions:
   contents: read
@@ -43,8 +43,8 @@ jobs:
             -H "Authorization: Bearer $CRON_SECRET" \
             "https://aidatamarketplacefinal.vercel.app/api/cron/research/sam-opportunities"
 
-      - name: Run OpenAI research analyst
-        if: github.event.schedule == '30 12 * * *'
+      - name: Run public-record research enrichment (AI when available; rules fallback otherwise)
+        if: startsWith(github.event.schedule, '30 ')
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
