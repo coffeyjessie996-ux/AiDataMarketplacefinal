@@ -40,6 +40,8 @@ export default function PipelinePage() {
   const [closePlan, setClosePlan] = useState<ClosePlan | null>(null);
   const [closePlanLead, setClosePlanLead] = useState('');
   const [closeBusy, setCloseBusy] = useState('');
+  const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; senderEmail: string | null }>({ connected: false, senderEmail: null });
+  const [gmailBusy, setGmailBusy] = useState(false);
 
   const headers = () => {
     const token = localStorage.getItem('auth_token');
@@ -69,6 +71,30 @@ export default function PipelinePage() {
   }, [query]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const loadGmailStatus = useCallback(async () => {
+    try {
+      const response = await fetch(API + '/gmail/status', { headers: headers() });
+      if (!response.ok) return;
+      const data = await response.json();
+      setGmailStatus({ connected: Boolean(data.connected), senderEmail: data.senderEmail || null });
+    } catch { /* Keep connection status unavailable without disrupting the pipeline. */ }
+  }, []);
+
+  useEffect(() => { void loadGmailStatus(); }, [loadGmailStatus]);
+
+  const connectGmail = async () => {
+    setGmailBusy(true); setError(''); setMessage('');
+    try {
+      const response = await fetch(API + '/gmail/oauth/start', { method: 'POST', headers: headers(), body: '{}' });
+      const data = await response.json();
+      if (!response.ok || typeof data.authorizationUrl !== 'string') throw new Error(data.error || 'Could not start Gmail authorization.');
+      window.location.assign(data.authorizationUrl);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start Gmail authorization.');
+      setGmailBusy(false);
+    }
+  };
 
   const importSuppliers = async () => {
     setBusy(true); setMessage(''); setError('');
@@ -168,13 +194,20 @@ export default function PipelinePage() {
 
   return <main style={{ minHeight: '100vh', padding: 24, background: '#0b1220', color: '#e5edf8' }}>
     <div style={{ maxWidth: 1180, margin: '0 auto' }}>
-      <nav style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
+      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 24 }}>
         <a href="/dashboard" style={{ color: '#93c5fd' }}>← Dashboard</a>
-        <a href="/" style={{ color: '#93c5fd' }}>Marketplace</a>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ color: gmailStatus.connected ? '#86efac' : '#fbbf24', fontSize: 12 }}>
+            {gmailStatus.connected ? 'Gmail connected: ' + gmailStatus.senderEmail : 'Gmail not connected'}
+          </span>
+          {!gmailStatus.connected && <button onClick={() => void connectGmail()} disabled={gmailBusy} style={{ padding: '8px 12px', border: 0, borderRadius: 7, background: '#1d4ed8', color: 'white' }}>{gmailBusy ? 'Opening Google…' : 'Connect Gmail'}</button>}
+          <a href="/" style={{ color: '#93c5fd' }}>Marketplace</a>
+        </div>
       </nav>
       <p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 12, fontWeight: 700 }}>GROWTH OPERATIONS</p>
       <h1 style={{ fontSize: 36, margin: '8px 0' }}>Lead &amp; Sales Pipeline</h1>
       <p style={{ color: '#a8b6ca' }}>Track sourced suppliers from first discovery through qualification, outreach, proposal, and closed outcome.</p>
+      <p style={{ color: '#93a4bd', fontSize: 12 }}>Gmail connection grants send-only access. Connecting does not send any messages; outreach safeguards and sending controls are a separate next step.</p>
       <section aria-label="Revenue node" style={{ background: '#101a2b', border: '1px solid #2563eb', borderRadius: 12, padding: 18, margin: '22px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
           <div><p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 11, fontWeight: 700, margin: 0 }}>REVENUE NODE · LIVE DATABASE</p><h2 style={{ fontSize: 24, margin: '6px 0' }}>Revenue &amp; conversion overview</h2></div>
