@@ -69,36 +69,49 @@ export function createCronRouter(prisma: PrismaClient) {
     const taskId = await startAgentTask(prisma, 'USAspending collector', 'Collect recent federal award records');
 
     try {
-      const response = await fetch(SOURCE_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
-        signal: AbortSignal.timeout(20000),
-        body: JSON.stringify({
-          filters: {
-            time_period: [{ start_date: startDate, end_date: endDate }],
-            award_type_codes: ['A', 'B', 'C', 'D'],
-          },
-          fields: [
-            'Award ID', 'Recipient Name', 'Award Amount', 'Start Date', 'End Date',
-            'Awarding Agency', 'Description', 'Place of Performance State Code', 'NAICS', 'Recipient UEI', 'generated_internal_id',
-          ],
-          page: 1,
-          limit: 100,
-          sort: 'Award Amount',
-          order: 'desc',
-        }),
-      });
-
-      if (!response.ok) {
-        await finishAgentTask(prisma, taskId, 'FAILED', { message: `USAspending.gov returned HTTP ${response.status}.` });
-        return res.status(502).json({
-          error: 'USAspending.gov returned an error.',
-          sourceStatus: response.status,
+      const rows: Array<Record<string, unknown>> = [];
+      let pagesFetched = 0;
+      for (const page of [1, 2, 3]) {
+        const response = await fetch(SOURCE_URL, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          signal: AbortSignal.timeout(20000),
+          body: JSON.stringify({
+            filters: {
+              time_period: [{ start_date: startDate, end_date: endDate }],
+              award_type_codes: ['A', 'B', 'C', 'D'],
+            },
+            fields: [
+              'Award ID', 'Recipient Name', 'Award Amount', 'Start Date', 'End Date',
+              'Awarding Agency', 'Description', 'Place of Performance State Code', 'NAICS', 'Recipient UEI', 'generated_internal_id',
+            ],
+            page,
+            limit: 100,
+            sort: 'Award Amount',
+            order: 'desc',
+          }),
         });
-      }
 
-      const payload = await response.json() as { results?: Array<Record<string, unknown>> };
-      const rows = Array.isArray(payload.results) ? payload.results : [];
+        if (!response.ok) {
+          await finishAgentTask(prisma, taskId, 'FAILED', {
+            message: `USAspending.gov returned HTTP ${response.status} while fetching page ${page}.`,
+            recordsFetched: rows.length,
+            recordsFailed: 1,
+          });
+          return res.status(502).json({
+            error: 'USAspending.gov returned an error.',
+            sourceStatus: response.status,
+            pagesFetched,
+            fetchedBeforeError: rows.length,
+          });
+        }
+
+        const payload = await response.json() as { results?: Array<Record<string, unknown>> };
+        const pageRows = Array.isArray(payload.results) ? payload.results : [];
+        pagesFetched += 1;
+        rows.push(...pageRows);
+        if (pageRows.length < 100) break;
+      }
       let saved = 0;
       let skipped = 0;
 
@@ -149,7 +162,7 @@ export function createCronRouter(prisma: PrismaClient) {
       }
 
       await finishAgentTask(prisma, taskId, 'COMPLETED', {
-        message: `USAspending collection completed: ${saved} records saved, ${skipped} skipped.`,
+        message: `USAspending collection completed: ${saved} records saved, ${skipped} skipped across ${pagesFetched} pages.`,
         recordsFetched: rows.length, recordsSaved: saved, recordsFailed: skipped,
       });
       return res.json({
@@ -160,7 +173,8 @@ export function createCronRouter(prisma: PrismaClient) {
         fetched: rows.length,
         saved,
         skipped,
-        note: 'Daily refresh of up to 100 high-value public award records from the last 90 days. These are supplier-research records, not verified contacts, sales, or marketplace revenue.',
+        pagesFetched,
+        note: 'Daily refresh of up to 300 high-value public award records from the last 90 days. These are supplier-research records, not verified contacts, sales, or marketplace revenue.',
       });
     } catch (error) {
       await finishAgentTask(prisma, taskId, 'FAILED', { message: 'USAspending collection failed before completion.' });
