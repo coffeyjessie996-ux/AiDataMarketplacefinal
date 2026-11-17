@@ -80,6 +80,7 @@ export default function ForBusinessesPage() {
         </p>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <a href="/#catalog" style={{ display: 'inline-flex', padding: '13px 19px', borderRadius: 9, background: 'linear-gradient(135deg,#38bdf8,#14b8a6)', color: '#04111b', fontWeight: 800, textDecoration: 'none' }}>Browse available data</a>
+          <a href="#buyer-inquiry" style={{ display: 'inline-flex', padding: '13px 19px', borderRadius: 9, border: '1px solid rgba(103,232,249,.55)', color: '#a5f3fc', fontWeight: 800, textDecoration: 'none' }}>Request a data preview</a>
           <a href="/register" style={{ display: 'inline-flex', padding: '13px 19px', borderRadius: 9, border: '1px solid rgba(148,163,184,.4)', color: '#f8fafc', fontWeight: 700, textDecoration: 'none' }}>Create buyer account</a>
         </div>
       </section>
