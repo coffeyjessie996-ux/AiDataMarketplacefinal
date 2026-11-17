@@ -18,6 +18,7 @@ type Dataset = {
 };
 
 type Overview = {
+  paymentProcessingEnabled: boolean;
   recordedPaidOrderValueCents: number;
   paidOrders: number;
   publishedDatasets: number;
@@ -52,7 +53,7 @@ export default function HomePage() {
           );
         }
         setDatasets(datasetsJson.datasets || []);
-        setOverview(overviewJson.snapshot || null);
+        setOverview(overviewJson.snapshot ? { ...overviewJson.snapshot, paymentProcessingEnabled: overviewJson.paymentProcessingEnabled === true } : null);
         setDataError(null);
       } catch (error) {
         console.error('Failed to load marketplace data', error);
@@ -116,7 +117,7 @@ export default function HomePage() {
             <span className="eyebrow">AI DATA MARKETPLACE</span>
             <h1>Search the web, clean the data, and sell it at scale.</h1>
             <p>
-              Discover market signals, organize real supplier and business intelligence, and prepare datasets for marketplace sales. Eligible listings use secure Stripe checkout, and downloads unlock only after payment is confirmed.
+              Discover market signals, organize real supplier and business intelligence, and prepare datasets for marketplace sales. {overview?.paymentProcessingEnabled ? 'Eligible published listings can use secure Stripe checkout, and delivery unlocks only after payment is confirmed.' : overview ? 'Checkout is currently disabled. You can browse the catalog and request a data preview, but purchases cannot be completed yet.' : 'Live checkout availability is being checked.'}
             </p>
             <div className="cta-row">
               <a href="#catalog" className="primary-button">Browse datasets</a>
@@ -213,8 +214,8 @@ export default function HomePage() {
                   </div>
                 </div>
                 {dataset.tags.includes('factory:v1') && dataset.status === 'published' && dataset.priceCents > 0 && dataset.licenseType !== 'restricted' && (
-                  <button className="primary-button" type="button" onClick={() => void startCheckout(dataset.id)} disabled={checkoutLoadingId === dataset.id}>
-                    {checkoutLoadingId === dataset.id ? 'Opening secure checkout…' : 'Buy securely'}
+                  <button className="primary-button" type="button" onClick={() => void startCheckout(dataset.id)} disabled={!overview?.paymentProcessingEnabled || checkoutLoadingId === dataset.id}>
+                    {!overview?.paymentProcessingEnabled ? 'Checkout disabled' : checkoutLoadingId === dataset.id ? 'Opening secure checkout…' : 'Buy securely'}
                   </button>
                 )}
               </article>
@@ -226,11 +227,11 @@ export default function HomePage() {
       <section id="money" className="money-section">
         <div className="money-card">
           <span className="eyebrow">FINANCIAL ENGINE</span>
-          <h2>Store profits, manage payouts, and cash out to bank.</h2>
+          <h2>Track verified sales and prepare seller payouts.</h2>
           <ul>
-            <li>Each purchase is recorded in the wallet ledger.</li>
-            <li>Marketplace commission logic is handled automatically.</li>
-            <li>Payout requests can be queued and approved to a bank account.</li>
+            <li>Only Stripe-confirmed paid orders count as marketplace revenue.</li>
+            <li>Wallet balances, draft prices, leads, and pending payouts are not verified sales.</li>
+            <li>Seller bank transfers and payout processing are not enabled in production.</li>
           </ul>
         </div>
       </section>
