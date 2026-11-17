@@ -303,9 +303,9 @@ function OverviewTab({ user, wallet, formatMoney }: { user?: User | null; wallet
 
       <div className="live-metric-grid">
         <article className="live-metric-card live-metric-featured">
-          <div className="live-metric-label">Wallet ledger balance</div>
+          <div className="live-metric-label">Internal wallet ledger (not revenue)</div>
           <div className="live-metric-value">{loading ? '—' : formatMoney(snapshot?.walletBalanceCents ?? wallet?.balanceCents ?? 0)}</div>
-          <div className="live-metric-caption">Application ledger only; payout processing is disabled.</div>
+          <div className="live-metric-caption">Not bank funds or verified paid-order revenue; withdrawals are disabled.</div>
         </article>
         <article className="live-metric-card">
           <div className="live-metric-label">{orderValueLabel}</div>
@@ -576,80 +576,22 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
   );
 }
 
-function WalletTab({ user, wallet, formatMoney }: { user?: User | null; wallet?: Wallet | null; formatMoney: (cents: number) => string }) {
-  const [amountToWithdraw, setAmountToWithdraw] = useState('');
-  const [bankAccount, setBankAccount] = useState('');
-  const [payoutMessage, setPayoutMessage] = useState('');
-
-  const handleWithdraw = async () => {
-    if (!amountToWithdraw || !bankAccount) {
-      setPayoutMessage('Enter an amount and destination details.');
-      return;
-    }
-    setPayoutMessage('');
-    try {
-      const token = localStorage.getItem('auth_token');
-      const res = await fetch(`${API}/wallet/payout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          amountCents: Math.round(parseFloat(amountToWithdraw) * 100),
-          method: 'bank_transfer',
-          destinationAccount: bankAccount,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setPayoutMessage(data.error || 'Payouts are not enabled until a verified payout provider is connected.');
-        return;
-      }
-      setPayoutMessage('Payout request submitted. This is not a completed transfer.');
-      setAmountToWithdraw('');
-      setBankAccount('');
-    } catch (error) {
-      console.error('Failed to request payout', error);
-      setPayoutMessage('Could not reach the payout service. No transfer has been confirmed.');
-    }
-  };
-
+function WalletTab({ wallet, formatMoney }: { user?: User | null; wallet?: Wallet | null; formatMoney: (cents: number) => string }) {
   return (
     <div>
       <div className="card" style={{ marginBottom: '24px' }}>
-        <h2 className="card-title">Wallet balance</h2>
+        <h2 className="card-title">Internal wallet ledger</h2>
         <div style={{ fontSize: '2.5rem', fontWeight: 700, color: '#38bdf8', marginBottom: '8px' }}>
           {formatMoney(wallet?.balanceCents || 0)}
         </div>
-        <p style={{ color: '#94a3b8', margin: 0 }}>Ledger balance only. Cashouts are disabled until a payout provider is connected.</p>
+        <p style={{ color: '#94a3b8', margin: 0 }}>Internal application ledger only. This is not bank cash, verified paid-order revenue, or a withdrawable balance.</p>
       </div>
 
       <div className="card">
-        <h2 className="card-title">Request payout</h2>
-        <div className="form-group">
-          <label>Amount (USD)</label>
-          <input
-            type="number"
-            placeholder="0.00"
-            value={amountToWithdraw}
-            onChange={(e) => setAmountToWithdraw(e.target.value)}
-          />
-        </div>
-        <div className="form-group">
-          <label>Bank account</label>
-          <input
-            type="text"
-            placeholder="**** 1234"
-            value={bankAccount}
-            onChange={(e) => setBankAccount(e.target.value)}
-          />
-        </div>
-        <button className="primary-button" onClick={handleWithdraw}>
-          Request payout
-        </button>
-        {payoutMessage && <p role="status" style={{ color: '#94a3b8' }}>{payoutMessage}</p>}
-        <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>A request does not mean money has been transferred. Payouts require a verified provider integration.</p>
+        <h2 className="card-title">Cash-outs are disabled</h2>
+        <p style={{ color: '#94a3b8', lineHeight: 1.6 }}>
+          A verified payout-provider integration is required before withdrawals can be requested. Bank account details are not collected here, and no transfers can be initiated from this dashboard.
+        </p>
       </div>
     </div>
   );
@@ -659,6 +601,11 @@ function PayoutsTab({ formatMoney }: { formatMoney: (cents: number) => string })
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const maskDestination = (value: string) => {
+    const normalized = value.replace(/\s+/g, '');
+    return normalized.length > 4 ? `•••• ${normalized.slice(-4)}` : 'Hidden';
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -701,7 +648,7 @@ function PayoutsTab({ formatMoney }: { formatMoney: (cents: number) => string })
                   <td>{new Date(payout.requestedAt).toLocaleDateString()}</td>
                   <td>{formatMoney(payout.amountCents)}</td>
                   <td>{payout.method}</td>
-                  <td>{payout.destinationAccount}</td>
+                  <td>{maskDestination(payout.destinationAccount)}</td>
                   <td><span className={`badge ${payout.status.toLowerCase()}`}>{payout.status}</span></td>
                 </tr>
               ))}
@@ -745,7 +692,7 @@ const startScrapers = async () => {
       throw new Error(data.error || 'Scraper failed.');
     }
 
-    setScraperMessage(`Scraped ${data.count} source(s) successfully.`);
+    setScraperMessage(`Saved ${Number(data.saved || 0)} public page snapshot(s). This does not run USAspending, SAM.gov, or Grants.gov collectors.`);
   } catch (error) {
     setScraperMessage(
       error instanceof Error ? error.message : 'Scraper failed.'
@@ -781,7 +728,7 @@ const startScrapers = async () => {
     onClick={startScrapers}
     disabled={scraping}
   >
-    {scraping ? 'Scraping...' : 'Start Scrapers'}
+    {scraping ? 'Capturing page...' : 'Snapshot usa.gov'}
   </button>
 
   {scraperMessage && (

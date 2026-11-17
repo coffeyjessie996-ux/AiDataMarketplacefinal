@@ -173,8 +173,9 @@ export default function PipelinePage() {
         <a href="/" style={{ color: '#93c5fd' }}>Marketplace</a>
       </nav>
       <p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 12, fontWeight: 700 }}>GROWTH OPERATIONS</p>
-      <h1 style={{ fontSize: 36, margin: '8px 0' }}>Lead &amp; Sales Pipeline</h1>
-      <p style={{ color: '#a8b6ca' }}>Track sourced suppliers from first discovery through qualification, outreach, proposal, and closed outcome.</p>
+      <h1 style={{ fontSize: 36, margin: '8px 0' }}>Supplier Lead Pipeline</h1>
+      <p style={{ color: '#a8b6ca', lineHeight: 1.6 }}>These are supplier companies sourced from public USAspending award records—not confirmed buyers of your datasets. Buyer interest is tracked separately through the consent-based buyer inquiry form.</p>
+      <p style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.5 }}>AI-assisted outreach and closing content on this page is draft-only for human review. Nothing is sent automatically.</p>
       <section aria-label="Revenue node" style={{ background: '#101a2b', border: '1px solid #2563eb', borderRadius: 12, padding: 18, margin: '22px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
           <div><p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 11, fontWeight: 700, margin: 0 }}>REVENUE NODE · LIVE DATABASE</p><h2 style={{ fontSize: 24, margin: '6px 0' }}>Revenue &amp; conversion overview</h2></div>
@@ -183,9 +184,9 @@ export default function PipelinePage() {
         {revenue ? <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10, marginTop: 14 }}>
             <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Actual paid order value</div><strong style={{ fontSize: 25 }}>{new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(revenue.actualPaidOrderValueCents / 100)}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>{revenue.actualPaidOrders} paid orders</div></div>
-            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Open opportunities</div><strong style={{ fontSize: 25 }}>{revenue.openLeads}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Leads not yet won or lost</div></div>
-            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Proposals</div><strong style={{ fontSize: 25 }}>{revenue.proposals}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Leads at proposal stage</div></div>
-            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Closed-won leads</div><strong style={{ fontSize: 25 }}>{revenue.closedWonLeads}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Not counted as paid until an order is PAID</div></div>
+            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Open supplier leads</div><strong style={{ fontSize: 25 }}>{revenue.openLeads}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Leads not yet won or lost</div></div>
+            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Supplier proposals</div><strong style={{ fontSize: 25 }}>{revenue.proposals}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Leads at proposal stage</div></div>
+            <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Supplier leads marked won</div><strong style={{ fontSize: 25 }}>{revenue.closedWonLeads}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Not counted as paid until an order is PAID</div></div>
             <div style={{ background: '#17263a', padding: 14, borderRadius: 9 }}><div style={{ color: '#9fb0c7', fontSize: 12 }}>Follow-ups due</div><strong style={{ fontSize: 25 }}>{revenue.followUpsDue}</strong><div style={{ color: '#9fb0c7', fontSize: 11 }}>Open leads needing attention</div></div>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 14, color: '#b8c6d9', fontSize: 12 }}>

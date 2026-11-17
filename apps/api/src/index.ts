@@ -1264,7 +1264,7 @@ app.get('/marketplace/overview', async (_req, res) => {
       source: 'database',
       updatedAt: new Date().toISOString(),
       // These are database records, not confirmation of a processed payment.
-      paymentProcessingEnabled: false,
+      paymentProcessingEnabled: process.env.STRIPE_CHECKOUT_ENABLED === 'true',
       snapshot: {
         recordedPaidOrderValueCents: Number(paidOrderValue._sum.totalCents ?? 0),
         paidOrders,
@@ -1370,7 +1370,7 @@ app.get('/dashboard/overview', requireAuth, async (req, res) => {
       updatedAt: new Date().toISOString(),
       role: user.role,
       testAccount: isTestAccount,
-      paymentProcessingEnabled: false,
+      paymentProcessingEnabled: process.env.STRIPE_CHECKOUT_ENABLED === 'true',
       snapshot: {
         walletBalanceCents: isTestAccount ? 0 : (wallet?.balanceCents ?? 0),
         totalDatasets,

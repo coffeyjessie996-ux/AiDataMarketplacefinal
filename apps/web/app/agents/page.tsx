@@ -132,7 +132,7 @@ export default function AgentActivityPage() {
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
                         <strong>{task.agentName}</strong>
-                        <span style={{ fontSize: 10, letterSpacing: 1, color: task.agentType === 'automation' ? '#93a4bd' : '#fbbf24', border: '1px solid #334155', borderRadius: 20, padding: '3px 7px' }}>{task.agentType === 'automation' ? 'SCHEDULED AUTOMATION' : 'RESEARCH TRIAGE'}</span>
+                        <span style={{ fontSize: 10, letterSpacing: 1, color: task.agentType === 'automation' ? '#93a4bd' : '#fbbf24', border: '1px solid #334155', borderRadius: 20, padding: '3px 7px' }}>{task.taskName.toLowerCase().includes('public web scraper') ? 'MANUAL WEB SNAPSHOT' : task.agentType === 'automation' ? 'SCHEDULED AUTOMATION' : 'RESEARCH TRIAGE'}</span>
                       </div>
                       <div style={{ color: '#cbd5e1', marginTop: 5 }}>{task.taskName}</div>
                     </div>
