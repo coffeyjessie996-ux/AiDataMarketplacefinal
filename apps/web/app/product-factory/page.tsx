@@ -257,7 +257,7 @@ export default function ProductFactoryPage() {
           <h1 style={{ fontSize: 'clamp(30px, 5vw, 44px)', margin: '8px 0 10px' }}>AI Data Product Factory</h1>
           <p style={{ color: '#a8b6ca', maxWidth: 820, lineHeight: 1.6 }}>
             Assemble real records already saved in your Data Bank into a private product draft. Source links and collection dates are retained, and a transparent completeness score is calculated from the records.
-          </p>
+          </p><p style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 1.5, marginTop: 14 }}>This product uses the Grants.gov API but is not endorsed or certified by the U.S. Department of Health and Human Services.</p>
         </header>
 
         <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16, marginBottom: 18 }}>
