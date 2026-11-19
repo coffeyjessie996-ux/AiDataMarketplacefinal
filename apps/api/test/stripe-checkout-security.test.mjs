@@ -13,10 +13,15 @@ function sectionBetween(start, end) {
 }
 
 const stripeConfig = sectionBetween('const stripeClient = () => {', '// Stripe Checkout is gated');
+const databaseConfig = sectionBetween('function hasValidDatabaseUrl()', '// Do not let a missing/invalid DATABASE_URL');
 const checkout = sectionBetween("app.post('/orders'", "// Stripe alone can confirm payment.");
 const webhook = sectionBetween("app.post('/webhooks/stripe'", "// A buyer can check the server-side order state");
 const statusLookup = sectionBetween("app.get('/orders/checkout-session/:sessionId'", "// Dataset delivery is generated");
 const download = sectionBetween("app.get('/orders/:id/download'", "// Public marketplace figures come from persisted database records only.");
+
+test('Preview database connection is recognized by the API health gate', () => {
+  assert.match(databaseConfig, /supabase_connection_string/);
+});
 
 test('Preview deployments require a dedicated Stripe test key and cannot fall back to the live key', () => {
   assert.match(stripeConfig, /VERCEL_ENV === 'preview'/);
