@@ -30,6 +30,8 @@ test('sales pipeline identifies opportunity types and links to original listings
   assert.match(uiSource, /GOVERNMENT SOLICITATION/);
   assert.match(uiSource, /View original opportunity/);
   assert.match(uiSource, /Use official application process/);
+  assert.match(uiSource, /Not applicable to work listings/);
+  assert.match(uiSource, /Not a sales forecast/);
 });
 
 test('sales pipeline does not present saved opportunities as confirmed buyers or revenue', () => {
