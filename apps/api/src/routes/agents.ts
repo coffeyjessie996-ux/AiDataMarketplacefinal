@@ -172,7 +172,7 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
           id: `remoteok:${String(row.id ?? url)}`, source: 'Remote OK', title, company, description,
           location: typeof row.location === 'string' ? row.location : 'Remote',
           url, postedAt: typeof row.date === 'string' ? row.date : null,
-          compensation: salary.length ? salary.map((value) => `${Number(value).toLocaleString()}`).join('–') : 'Not disclosed',
+          compensation: salary.length ? salary.map((value) => `$ ${Number(value).toLocaleString()}`).join('–') : 'Not disclosed',
           type: 'remote-role', applicationRequired: true,
         }];
       });
@@ -186,13 +186,13 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
       const samOpportunities = samRecords.flatMap((record) => {
         const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
           ? record.payload as Record<string, unknown> : {};
-        const title = String(payload.title ?? payload.noticeTitle ?? payload.description ?? 'Federal solicitation').slice(0, 220);
-        const searchable = `${title} ${String(payload.description ?? '')} ${String(payload.naicsCode ?? '')}`.toLowerCase();
+        const title = String(payload.title ?? payload.noticeTitle ?? 'Federal solicitation').slice(0, 220);
+        const searchable = `${title} ${`${String(payload.department ?? '')} ${String(payload.naicsCode ?? '')} ${String(payload.setAside ?? '')}`} ${String(payload.naicsCode ?? '')}`.toLowerCase();
         if (terms.length && !terms.every((term) => searchable.includes(term))) return [];
         return [{
           id: `sam.gov:${record.sourceRecordId}`, source: 'SAM.gov', title,
-          company: typeof payload.departmentName === 'string' ? payload.departmentName : 'U.S. federal agency',
-          description: String(payload.description ?? 'Review the official solicitation for scope, eligibility, deadlines, and award terms.').replace(/<[^>]*>/g, ' ').slice(0, 500),
+          company: typeof payload.department === 'string' ? payload.department : 'U.S. federal agency',
+          description: `Solicitation ${String(payload.solicitationNumber ?? record.sourceRecordId)}. Type: ${String(payload.type ?? 'Not specified')}. Response deadline: ${String(payload.responseDeadline ?? 'Check the official notice')}. Set-aside: ${String(payload.setAside ?? 'Not specified')}.`.replace(/<[^>]*>/g, ' ').slice(0, 500),
           location: typeof payload.placeOfPerformance === 'string' ? payload.placeOfPerformance : 'See official notice',
           url: record.sourceUrl, postedAt: record.retrievedAt.toISOString(),
           compensation: 'Contract value varies; see solicitation',
