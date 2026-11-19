@@ -1,6 +1,6 @@
 # Source rights register and release rules
 
-**Status: conservative hold. No source in this register is approved for commercial resale yet.**
+**Status: narrow approval for NWS-issued point forecasts only; all other sources remain subject to the decisions below.**
 
 This register is an operational control, not a legal opinion or a substitute for advice from a qualified attorney. Public availability, a public API key, a FOIA release, or a government website URL does not by itself prove that a particular collection can be copied, packaged, redistributed, or resold.
 
@@ -19,9 +19,9 @@ A seller's attestation or a link to a terms page is not, by itself, a legal dete
 
 ## Current source decisions
 
-| Source | Current decision | Reason / conditions |
+| Source | Current decision | Reason / conditions |\n|---|---|---|
 |---|---|---|
-| USAspending.gov | Internal research only | Public federal award data is being collected through its API. This project has not completed a field-level redistribution/commercial resale review, including any third-party material or privacy considerations. |
+| NWS API point/grid forecasts (`api.weather.gov`) | Approved for commercial reuse within the defined scope | NWS API documentation says API information is open data, free to use for any purpose. Approval covers only NWS-issued forecast periods from `/points` and linked `/gridpoints/.../forecast`; excludes third-party station observations, imagery, other external feeds, and unreviewed datasets. Use an identifying User-Agent, sensible request frequency, valid-time labels, source attribution, and non-endorsement language. |\n| USAspending.gov | Internal research only | Public federal award data is being collected through its API. This project has not completed a field-level redistribution/commercial resale review, including any third-party material or privacy considerations. |
 | SAM.gov opportunities | Paused; internal research only | The app must use only the documented public API with the correct account/API permissions. SAM.gov terms prohibit automated website scraping and restrict sensitive/FOUO data. No resale permission for this packaged product has been documented. |
 | SAM.gov entity / D&B data | Do not collect or resell | SAM.gov terms state that non-open D&B data cannot be used for commercial, resale, or marketing purposes. D&B Open Data has attribution and no-bulk-redistribution restrictions. |
 | Grants.gov opportunities | Internal research only | API terms allow searching, displaying, analyzing, and retrieving data; require a prominent non-endorsement notice and prohibit false representation. Commercial resale rights for packaged datasets have not been separately established. |
@@ -32,7 +32,7 @@ A seller's attestation or a link to a terms page is not, by itself, a legal dete
 
 ## Official source references reviewed
 
-- SAM.gov Terms of Use: https://sam.gov/about/terms-of-use
+- NWS API documentation and use terms: https://www.weather.gov/documentation/services-web-api\n- NWS public-domain and non-endorsement disclaimer: https://www.weather.gov/disclaimer\n- SAM.gov Terms of Use: https://sam.gov/about/terms-of-use
 - GSA SAM.gov Entity Management API documentation: https://open.gsa.gov/api/entity-api/
 - Grants.gov API Terms & Conditions: https://www.grants.gov/api/terms-conditions
 - Data.gov licensing policy: https://data.gov/privacy-policy/
@@ -63,7 +63,7 @@ Other federal, state, and international privacy or marketing laws may apply depe
 
 - New datasets created through the general API are forced to DRAFT, RESTRICTED, and $0.
 - Product Factory publication, Stripe checkout, auction creation, auction discovery, and bidding require every source to be explicitly marked `commercial_reuse_approved` in `apps/api/src/services/source-rights.ts`.
-- The approved source set is intentionally empty until a documented review is completed.
+- `nws_api_forecasts` is the sole narrow approved source: NWS-issued point/grid forecast periods only. The source registry explicitly excludes third-party observations and imagery. All other sources remain unapproved until a documented review is completed.
 - SAM.gov scheduled opportunity collection is paused unless a separate server-side feature flag is explicitly enabled after authorization and rights review.
 - Generic webpage collection requires exact hostnames in `PUBLIC_WEB_SCRAPE_ALLOWED_HOSTS`; the list must be populated only after terms, robots guidance, and permission are reviewed. Empty means scraping is paused.
 - SAM.gov point-of-contact fields are not persisted as sales contact data.
