@@ -144,7 +144,7 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
   // This is discovery only: no applications, bids, outreach, or paid work are submitted.
   router.get('/opportunities/search', async (req, res) => {
     const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
-    const terms = query.toLowerCase().split(/\\s+/).filter(Boolean);
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     const taskPattern = /data entry|data analyst|data engineer|research|market research|spreadsheet|virtual assistant|ai trainer|annotation|transcription|lead generation|web researcher|business intelligence|freelance|contractor|remote/i;
     const taskId = await prisma.agentTaskRun.create({
       data: { agentName: 'Opportunity Hunter', agentType: 'ai_agent', taskName: 'Search public paid-work opportunities', status: 'RUNNING', message: 'Searching public job listings and saved government notices.' },
@@ -162,7 +162,7 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
       const remoteJobs = remoteRows.flatMap((row) => {
         const title = typeof row.position === 'string' ? row.position : '';
         const company = typeof row.company === 'string' ? row.company : 'Company not listed';
-        const description = typeof row.description === 'string' ? row.description.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').slice(0, 500) : '';
+        const description = typeof row.description === 'string' ? row.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 500) : '';
         const tags = Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === 'string') : [];
         const searchable = `${title} ${company} ${description} ${tags.join(' ')}`.toLowerCase();
         if (!title || !taskPattern.test(searchable) || (terms.length && !terms.every((term) => searchable.includes(term)))) return [];
@@ -187,13 +187,13 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
         const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
           ? record.payload as Record<string, unknown> : {};
         const title = String(payload.title ?? payload.noticeTitle ?? 'Federal solicitation').slice(0, 220);
-        const searchable = `${title} ${`${String(payload.department ?? '')} ${String(payload.naicsCode ?? '')} ${String(payload.setAside ?? '')}`} ${String(payload.naicsCode ?? '')}`.toLowerCase();
+        const searchable = `${title} ${String(payload.department ?? '')} ${String(payload.naicsCode ?? '')} ${String(payload.setAside ?? '')}`.toLowerCase();
         if (terms.length && !terms.every((term) => searchable.includes(term))) return [];
         return [{
           id: `sam.gov:${record.sourceRecordId}`, source: 'SAM.gov', title,
           company: typeof payload.department === 'string' ? payload.department : 'U.S. federal agency',
           description: `Solicitation ${String(payload.solicitationNumber ?? record.sourceRecordId)}. Type: ${String(payload.type ?? 'Not specified')}. Response deadline: ${String(payload.responseDeadline ?? 'Check the official notice')}. Set-aside: ${String(payload.setAside ?? 'Not specified')}.`.replace(/<[^>]*>/g, ' ').slice(0, 500),
-          location: typeof payload.placeOfPerformance === 'string' ? payload.placeOfPerformance : 'See official notice',
+          location: payload.placeOfPerformance ? JSON.stringify(payload.placeOfPerformance).slice(0, 180) : 'See official notice',
           url: record.sourceUrl, postedAt: record.retrievedAt.toISOString(),
           compensation: 'Contract value varies; see solicitation',
           type: 'government-solicitation', applicationRequired: true,
