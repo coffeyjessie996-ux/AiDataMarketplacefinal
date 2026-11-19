@@ -67,6 +67,27 @@ export default function AgentActivityPage() {
     }
   }, []);
 
+  const runAgent = async (agentId: string) => {
+    setRunningAgent(agentId); setAgentResult(''); setError('');
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('Please sign in first.');
+      const response = await fetch(`${API}/agents/run`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Agent task failed.');
+      setAgentResult(result.message || 'Agent task completed.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Agent task failed.');
+    } finally {
+      setRunningAgent('');
+    }
+  };
+
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => { void load(); }, 5000);
