@@ -21,6 +21,8 @@ export default function OpportunitiesPage() {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string[]>([]);
   const [error, setError] = useState('');
 
   async function search() {
@@ -39,6 +41,24 @@ export default function OpportunitiesPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Opportunity search failed.');
     } finally { setBusy(false); }
+  }
+
+  async function saveOpportunity(item: Opportunity) {
+    setSaving(item.id); setError('');
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('Please sign in first.');
+      const response = await fetch(`${API}/agents/opportunities/save`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Could not save this opportunity.');
+      setSaved(current => current.includes(item.id) ? current : [...current, item.id]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save this opportunity.');
+    } finally { setSaving(null); }
   }
 
   return (
@@ -81,7 +101,12 @@ export default function OpportunitiesPage() {
               <p style={{ color: '#a8b6ca', lineHeight: 1.55 }}>{item.description || 'Open the original listing for full requirements and terms.'}</p>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ color: '#93a4bd', fontSize: 12 }}>{item.postedAt ? `Listed: ${new Date(item.postedAt).toLocaleDateString()}` : 'Posting date not supplied'} · Apply or bid on source site</span>
-                <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ background: '#2563eb', color: 'white', padding: '9px 13px', borderRadius: 7, textDecoration: 'none', fontWeight: 700 }}>Review original listing ↗</a>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button type="button" onClick={() => void saveOpportunity(item)} disabled={saving === item.id || saved.includes(item.id)} style={{ padding: '9px 13px', borderRadius: 7, border: '1px solid #475569', background: saved.includes(item.id) ? '#14532d' : '#1e293b', color: 'white', fontWeight: 700, cursor: 'pointer' }}>
+                    {saved.includes(item.id) ? 'Saved to pipeline' : saving === item.id ? 'Saving…' : 'Save to sales pipeline'}
+                  </button>
+                  <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ background: '#2563eb', color: 'white', padding: '9px 13px', borderRadius: 7, textDecoration: 'none', fontWeight: 700 }}>Review original listing ↗</a>
+                </div>
               </div>
             </article>)}
           </section> : <p style={{ color: '#a8b6ca' }}>No matching listings were returned. Try a broader search or check again later.</p>}

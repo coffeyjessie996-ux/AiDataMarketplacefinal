@@ -223,5 +223,47 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
     }
   });
 
+
+  // Save a reviewed public opportunity to the signed-in user's sales pipeline.
+  // Only allow source URLs from the two sources surfaced by Opportunity Hunter.
+  router.post('/opportunities/save', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    const body = req.body ?? {};
+    const source = body.source === 'Remote OK' ? 'Remote OK' : body.source === 'SAM.gov' ? 'SAM.gov' : null;
+    const title = typeof body.title === 'string' ? body.title.trim().slice(0, 220) : '';
+    const company = typeof body.company === 'string' ? body.company.trim().slice(0, 180) : '';
+    const description = typeof body.description === 'string' ? body.description.trim().slice(0, 1500) : '';
+    const opportunityId = typeof body.id === 'string' ? body.id.trim().slice(0, 300) : '';
+    let sourceUrl: URL;
+    try { sourceUrl = new URL(String(body.url ?? '')); } catch { return res.status(400).json({ error: 'A valid source listing URL is required.' }); }
+    const allowedHost = source === 'Remote OK'
+      ? sourceUrl.hostname === 'remoteok.com' || sourceUrl.hostname === 'www.remoteok.com'
+      : source === 'SAM.gov'
+        ? sourceUrl.hostname === 'sam.gov' || sourceUrl.hostname === 'www.sam.gov'
+        : false;
+    if (!source || !title || !company || !opportunityId || sourceUrl.protocol !== 'https:' || !allowedHost) {
+      return res.status(400).json({ error: 'Only valid Remote OK or SAM.gov listings can be saved.' });
+    }
+    const sourceKey = `opportunity:${user.id}:${source}:${opportunityId}`;
+    try {
+      const lead = await prisma.lead.upsert({
+        where: { sourceKey },
+        create: {
+          ownerId: user.id, source, sourceRecordId: opportunityId, sourceKey,
+          companyName: company, website: sourceUrl.toString(), description: `[${title}] ${description}`.slice(0, 1800),
+          stage: 'NEW', notes: 'Saved from Opportunity Hunter. Verify eligibility, compensation, deadlines, and source terms before contacting or applying.',
+        },
+        update: {},
+        select: { id: true, companyName: true, source: true, stage: true, createdAt: true },
+      });
+      return res.json({ ok: true, lead,
+        note: 'Saved as a new pipeline lead. This is not a confirmed buyer, contract, or earned revenue. No contact or application was sent.' });
+    } catch (error) {
+      console.error('Opportunity pipeline save failed', error);
+      return res.status(500).json({ error: 'Could not save this opportunity to the sales pipeline.' });
+    }
+  });
+
   return router;
 }
