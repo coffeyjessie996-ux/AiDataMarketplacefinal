@@ -20,7 +20,9 @@ type SearchResult = {
 export default function OpportunitiesPage() {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
-  const [busy, setBusy] = useState(false);\n  const [saving, setSaving] = useState<string | null>(null);\n  const [saved, setSaved] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string[]>([]);
   const [error, setError] = useState('');
 
   async function search() {
