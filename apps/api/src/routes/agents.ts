@@ -149,7 +149,7 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
     const taskId = await prisma.agentTaskRun.create({
       data: { agentName: 'Opportunity Hunter', agentType: 'ai_agent', taskName: 'Search public paid-work opportunities', status: 'RUNNING', message: 'Searching public job listings and saved government notices.' },
       select: { id: true },
-    }).catch(() => null);
+    }).then((task) => task.id).catch(() => null);
 
     try {
       const remoteResponse = await fetch('https://remoteok.com/api', {
