@@ -190,6 +190,13 @@ export function createCronRouter(prisma: PrismaClient) {
     const apiKey = process.env.SAM_API_KEY;
     if (!secret) return res.status(503).json({ error: 'Scheduled research is not configured: CRON_SECRET is missing.' });
     if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized scheduled research request.' });
+    if (process.env.SAM_OPPORTUNITY_RESEARCH_ENABLED !== 'true') {
+      return res.status(200).json({
+        ok: true,
+        skipped: true,
+        reason: 'SAM.gov opportunity collection is paused until API authorization and source-specific redistribution terms are reviewed.',
+      });
+    }
     if (!allowSamOpportunityRequest(req.ip || 'unknown')) {
       res.setHeader('Retry-After', '900');
       return res.status(429).json({ error: 'Too many SAM.gov research requests. Try again later.' });
@@ -313,7 +320,6 @@ export function createCronRouter(prisma: PrismaClient) {
             classificationCode: asText(row.classificationCode),
             setAside: asText(row.typeOfSetAsideDescription),
             award: Object.keys(award).length ? award : null,
-            pointOfContact: Array.isArray(row.pointOfContact) ? row.pointOfContact : null,
             placeOfPerformance: row.placeOfPerformance ?? null,
             sourceUrl,
             retrievedAt: retrievedAt.toISOString(),

@@ -2,6 +2,7 @@ import express from 'express';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
 import { z } from 'zod';
+import { isCommercialReuseApproved } from '../services/source-rights';
 
 type AuthReq = express.Request & { user?: User };
 type JsonObject = Record<string, unknown>;
@@ -342,6 +343,16 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
       });
       if (!product) return res.status(404).json({ error: 'Product draft not found.' });
       if (product.status !== 'DRAFT') return res.status(409).json({ error: 'Only an unpublished draft can be published from this workflow.' });
+
+      const sourceNames = product.tags
+        .filter((tag) => tag.startsWith('source:'))
+        .map((tag) => tag.slice('source:'.length));
+      if (!sourceNames.length || sourceNames.some((source) => !isCommercialReuseApproved(source))) {
+        return res.status(409).json({
+          error: 'Publishing is blocked until commercial redistribution rights are verified and approved for every source in this product.',
+          blockedSources: sourceNames,
+        });
+      }
 
       const readTag = (prefix: string) => product.tags.find((tag) => tag.startsWith(prefix))?.slice(prefix.length) ?? '';
       const evidenceUrl = readTag('license-review-evidence:');
