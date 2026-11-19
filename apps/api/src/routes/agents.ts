@@ -11,7 +11,16 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
   const router = express.Router();
   router.use(auth);
 
-  router.get('/catalog', (_req, res) => res.json({
+  const requireAgentRole: express.RequestHandler = (req, res, next) => {
+    const user = (req as AuthReq).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    if (user.role !== 'seller' && user.role !== 'admin') {
+      return res.status(403).json({ error: 'Marketplace agents are available to seller and administrator accounts.' });
+    }
+    next();
+  };
+
+  router.get('/catalog', requireAgentRole, (_req, res) => res.json({
     agents: [
       { id: 'research_opportunity_scan', name: 'Research & Opportunity Agent', purpose: 'Summarizes existing internal research records and identifies missing evidence.', actions: 'Read-only database analysis; no scraping or external contact.' },
       { id: 'data_rights_audit', name: 'Data Production & Rights Agent', purpose: 'Checks datasets, listings, and source tags against the source-rights register.', actions: 'Read-only compliance audit; cannot publish or price data.' },
@@ -22,10 +31,10 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
     paymentExecutionEnabled: false,
   }));
 
-  router.post('/run', async (req, res) => {
+  router.post('/run', requireAgentRole, async (req, res) => {
     const user = (req as AuthReq).user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
-    if (user.role !== 'admin') return res.status(403).json({ error: 'Only an administrator can run marketplace agents.' });
+    const isAdmin = user.role === 'admin';
     const job = req.body?.agentId as AgentJob;
     if (!agentJobs.includes(job)) return res.status(400).json({ error: 'Choose one of the available agent jobs.' });
 
@@ -54,10 +63,13 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
         message = `Research scan complete. ${total} saved records; ${namedSuppliers} include a supplier name. Source breakdown: ${sources}. These are research records, not verified prospects or revenue.`;
       } else if (job === 'data_rights_audit') {
         const [datasets, listings, published, openAuctions] = await Promise.all([
-          prisma.dataset.findMany({ select: { id: true, status: true, tags: true } }),
-          prisma.listing.count(),
-          prisma.dataset.count({ where: { status: 'PUBLISHED' } }),
-          prisma.auction.count({ where: { status: 'OPEN' } }),
+          prisma.dataset.findMany({
+            where: isAdmin ? {} : { sellerId: user.id },
+            select: { id: true, status: true, tags: true },
+          }),
+          prisma.listing.count({ where: isAdmin ? {} : { dataset: { sellerId: user.id } } }),
+          prisma.dataset.count({ where: { ...(isAdmin ? {} : { sellerId: user.id }), status: 'PUBLISHED' } }),
+          prisma.auction.count({ where: { status: 'OPEN', ...(isAdmin ? {} : { dataset: { sellerId: user.id } }) } }),
         ]);
         const sourceNames = new Set<string>();
         for (const dataset of datasets) for (const tag of dataset.tags) if (tag.startsWith('source:')) sourceNames.add(tag.slice(7));
@@ -67,9 +79,9 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
         message = `Rights audit complete. ${datasets.length} datasets, ${listings} listings, ${published} published datasets, ${openAuctions} open auctions. Tagged sources: ${[...sourceNames].join(', ') || 'none'}. Approved sources: ${approved.join(', ') || 'none'}. Unresolved or unregistered sources: ${unresolved.join(', ') || 'none'}. No data was published or changed.`;
       } else {
         const [leads, byStage, inquiries] = await Promise.all([
-          prisma.lead.count(),
-          prisma.lead.groupBy({ by: ['stage'], _count: { _all: true } }),
-          prisma.buyerDemandEvent.count(),
+          prisma.lead.count({ where: isAdmin ? {} : { ownerId: user.id } }),
+          prisma.lead.groupBy({ by: ['stage'], where: isAdmin ? {} : { ownerId: user.id }, _count: { _all: true } }),
+          prisma.buyerDemandEvent.count({ where: { status: 'SEARCH' } }),
         ]);
         recordsFetched = leads + inquiries;
         const stages = byStage.map((item) => `${item.stage}: ${item._count._all}`).join('; ') || 'No pipeline leads';
@@ -88,7 +100,7 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
     }
   });
 
-  router.get('/activity', async (req, res) => {
+  router.get('/activity', requireAgentRole, async (req, res) => {
     const user = (req as AuthReq).user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
 
