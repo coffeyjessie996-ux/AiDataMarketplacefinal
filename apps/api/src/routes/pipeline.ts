@@ -5,6 +5,7 @@ import type { User } from '../types';
 
 type AuthReq = express.Request & { user?: User };
 const stages = ['NEW', 'QUALIFIED', 'CONTACTED', 'PROPOSAL', 'WON', 'LOST'] as const;
+const isExternalWorkOpportunity = (source: string) => source === 'Remote OK' || source === 'SAM.gov';
 const stageCloseProbability: Record<(typeof stages)[number], number> = {
   NEW: 5, QUALIFIED: 15, CONTACTED: 25, PROPOSAL: 50, WON: 100, LOST: 0,
 };
@@ -138,12 +139,14 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
   router.post('/leads/:id/ai-draft', async (req, res) => {
     const user = (req as AuthReq).user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
-    if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: 'AI sales assistant is not configured. Add OPENAI_API_KEY to the API environment.' });
-
     const lead = await prisma.lead.findFirst({
       where: { id: req.params.id, ...(user.role === 'admin' ? {} : { ownerId: user.id }) },
     });
     if (!lead) return res.status(404).json({ error: 'Lead not found.' });
+    if (isExternalWorkOpportunity(lead.source)) {
+      return res.status(409).json({ error: 'This is a public work opportunity, not a sales prospect. Review the original listing and apply or respond directly through its official process.' });
+    }
+    if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: 'AI sales assistant is not configured. Add OPENAI_API_KEY to the API environment.' });
 
     const taskId = randomUUID();
     try {
@@ -194,13 +197,15 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
   router.post('/leads/:id/close-plan', async (req, res) => {
     const user = (req as AuthReq).user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
-    if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: 'AI deal closer is not configured. Add OPENAI_API_KEY to the API environment.' });
-
     const lead = await prisma.lead.findFirst({
       where: { id: req.params.id, ...(user.role === 'admin' ? {} : { ownerId: user.id }) },
       include: { activities: { orderBy: { createdAt: 'desc' }, take: 10 } },
     });
     if (!lead) return res.status(404).json({ error: 'Lead not found.' });
+    if (isExternalWorkOpportunity(lead.source)) {
+      return res.status(409).json({ error: 'This is a public work opportunity, not a sales prospect. Review the original listing and follow its official application or bid process.' });
+    }
+    if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: 'AI deal closer is not configured. Add OPENAI_API_KEY to the API environment.' });
 
     try {
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
