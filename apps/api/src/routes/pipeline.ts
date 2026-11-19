@@ -9,6 +9,37 @@ const stageCloseProbability: Record<(typeof stages)[number], number> = {
   NEW: 5, QUALIFIED: 15, CONTACTED: 25, PROPOSAL: 50, WON: 100, LOST: 0,
 };
 
+function calculateLeadPriority(input: {
+  companyName?: string | null; source?: string | null; awardAmount?: unknown;
+  description?: string | null; contactName?: string | null; email?: string | null; website?: string | null;
+}) {
+  const description = input.description || '';
+  const checks = [
+    { label: 'Company identified', points: 10, complete: Boolean(input.companyName?.trim()) },
+    { label: 'Award amount available', points: 5, complete: input.awardAmount !== null && input.awardAmount !== undefined && Number.isFinite(Number(input.awardAmount)) },
+    { label: 'Awarding agency available', points: 5, complete: /Agency:\s*[^•]+/i.test(description) },
+    { label: 'NAICS classification available', points: 5, complete: /NAICS:\s*[^•]+/i.test(description) },
+    { label: 'UEI available', points: 10, complete: /UEI:\s*[^•]+/i.test(description) },
+    { label: 'Award description available', points: 5, complete: /Award description:\s*[^•]+/i.test(description) },
+    { label: 'Performance location available', points: 5, complete: /Performance state:\s*[^•]+/i.test(description) },
+    { label: 'Start date available', points: 5, complete: /Start date:\s*[^•]+/i.test(description) },
+    { label: 'End date available', points: 5, complete: /End date:\s*[^•]+/i.test(description) },
+    { label: 'Email contact available', points: 20, complete: Boolean(input.email?.trim()) },
+    { label: 'Company website available', points: 10, complete: Boolean(input.website?.trim()) },
+    { label: 'Named contact available', points: 10, complete: Boolean(input.contactName?.trim()) },
+    { label: 'Source identified', points: 5, complete: Boolean(input.source?.trim()) },
+  ];
+  let score = checks.reduce((total, check) => total + (check.complete ? check.points : 0), 0);
+  const hasDirectContact = Boolean(input.email?.trim() || input.website?.trim() || input.contactName?.trim());
+  if (!hasDirectContact) score = Math.min(score, 59);
+  return { score: Math.min(100, score), priorityReasons: checks.filter((check) => check.complete).map((check) => check.label),
+    priorityBlockers: [
+      ...(!input.email?.trim() ? ['No email address on record'] : []),
+      ...(!input.website?.trim() ? ['No company website on record'] : []),
+      ...(!input.contactName?.trim() ? ['No named contact on record'] : []),
+      ...(!hasDirectContact ? ['Score capped until a direct contact path is found'] : []),
+    ] };
+}
 export function createPipelineRouter(prisma: PrismaClient, auth: express.RequestHandler) {
   const router = express.Router();
   router.use(auth);
@@ -31,7 +62,7 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       const closeProbabilityPercent = stageCloseProbability[lead.stage];
       const predictedProfitCents = expectedDealValueCents == null ? null
         : Math.round(expectedDealValueCents * expectedMarginPercent / 100 * closeProbabilityPercent / 100);
-      return { ...lead, expectedMarginPercent, closeProbabilityPercent, predictedProfitCents };
+      return { ...lead, ...calculateLeadPriority(lead), expectedMarginPercent, closeProbabilityPercent, predictedProfitCents };
     });
     return res.json({ count: forecastLeads.length, leads: forecastLeads });
   });
@@ -62,7 +93,6 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       const name = record.supplierName?.trim();
       if (!name) continue;
       const amount = Number(record.awardAmount ?? 0);
-      const score = amount >= 1000000 ? 85 : amount >= 250000 ? 75 : amount >= 50000 ? 65 : amount >= 10000 ? 55 : 40;
       const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
         ? record.payload as Record<string, unknown> : {};
       const value = (...keys: string[]) => {
@@ -82,18 +112,25 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
         value('description', 'Description', 'description') && `Award description: ${value('description', 'Description', 'description')}`,
       ].filter(Boolean);
       const description = detailParts.join(' • ').slice(0, 3000) || 'Public federal award recipient record. Contact details are not supplied by this source.';
+      const contactName = value('contactName', 'contact_name', 'recipientContactName');
+      const email = value('email', 'contactEmail', 'recipientEmail');
+      const website = value('website', 'companyWebsite', 'recipientWebsite');
+      const priority = calculateLeadPriority({ companyName: name, source: record.source, awardAmount: record.awardAmount, description, contactName, email, website });
+      const score = priority.score;
       const sourceKey = `usaspending.gov:${record.sourceRecordId}:${user.id}`;
       await prisma.lead.upsert({
         where: { sourceKey },
         create: { id: randomUUID(), ownerId: user.id, source: 'usaspending.gov', sourceRecordId: record.sourceRecordId,
           sourceKey, companyName: name, awardAmount: record.awardAmount ?? undefined, score, description,
+          contactName: contactName || null, email: email || null, website: website || null,
           activities: { create: { type: 'imported', description: 'Imported and enriched from saved USAspending.gov award details.' } } },
-        update: { sourceRecordId: record.sourceRecordId, awardAmount: record.awardAmount ?? undefined, score, description },
+        update: { sourceRecordId: record.sourceRecordId, awardAmount: record.awardAmount ?? undefined, score, description,
+          contactName: contactName || undefined, email: email || undefined, website: website || undefined },
       });
       imported++;
     }
     return res.json({ source: 'USAspending.gov', recordsReviewed: records.length, leadsCreatedOrExisting: imported,
-      note: 'Score is an award-size prioritization hint only, not supplier verification or predicted conversion.' });
+      note: 'Priority reflects public-record completeness and contactability, not supplier verification or predicted conversion. Records without an email, website, or named contact are capped at 59.' });
   });
 
   // AI sales assistant: create an evidence-based outreach draft for human review.

@@ -22,6 +22,7 @@ type Lead = {
   awardAmount?: string | number | null; expectedDealValueCents?: number | null;
   expectedMarginPercent?: number; closeProbabilityPercent?: number; predictedProfitCents?: number | null;
   score: number; stage: string;
+  priorityReasons?: string[]; priorityBlockers?: string[];
   notes?: string | null; nextFollowUpAt?: string | null; updatedAt: string;
 };
 
@@ -259,7 +260,7 @@ export default function PipelinePage() {
                     <div style={{ fontSize: 11, color: '#93a4bd' }}>{lead.closeProbabilityPercent}% stage probability</div></>}
               </td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}>{lead.email ? <a href={`mailto:${lead.email}`} style={{ color: '#93c5fd' }}>{lead.email}</a> : lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: '#93c5fd' }}>Company website</a> : <span style={{ color: '#fbbf24' }}>Not provided by source</span>}</td>
-              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>{lead.score}/100</td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}><strong>{lead.score}/100</strong><div style={{ color: '#93a4bd', fontSize: 11, marginTop: 4 }}>{(lead.priorityReasons || []).slice(0, 3).join(' · ')}</div>{lead.priorityBlockers?.length ? <div style={{ color: '#fbbf24', fontSize: 11, marginTop: 4 }}>{lead.priorityBlockers.slice(0, 2).join(' · ')}</div> : null}</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><select value={lead.stage} onChange={e => void changeStage(lead,e.target.value)} style={{ padding: 8, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }}>{stages.map(s => <option key={s} value={s}>{s}</option>)}</select></td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><input aria-label={`Follow-up date for ${lead.companyName}`} type="date" value={lead.nextFollowUpAt ? lead.nextFollowUpAt.slice(0,10) : ''} onChange={e => void changeFollowUp(lead,e.target.value)} style={{ padding: 7, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }} /></td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><button onClick={() => void createAiDraft(lead)} disabled={Boolean(draftBusy)} style={{ padding: '8px 10px', background: '#1d4ed8', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer' }}>{draftBusy === lead.id ? 'Drafting…' : 'Create AI draft'}</button></td>
@@ -267,7 +268,7 @@ export default function PipelinePage() {
             </tr>)}</tbody>
           </table></div>}
       </section>
-      <p style={{ color: '#8291a7', fontSize: 12, marginTop: 14 }}>Forecast formula: expected deal value × editable marketplace margin × stage close probability (NEW 5%, QUALIFIED 15%, CONTACTED 25%, PROPOSAL 50%, WON 100%, LOST 0%). The 20% margin is an editable planning assumption, not a verified historical margin. Forecasts are not actual revenue or profit. Government award amounts are shown separately and never used as deal values. Payment and checkout remain separately disabled until verified Stripe processing is implemented.</p>
+      <p style={{ color: '#8291a7', fontSize: 12, marginTop: 14 }}>Forecast formula: expected deal value × editable marketplace margin × stage close probability (NEW 5%, QUALIFIED 15%, CONTACTED 25%, PROPOSAL 50%, WON 100%, LOST 0%). The 20% margin is an editable planning assumption, not a verified historical margin. Lead priority reflects record completeness and contactability, not conversion probability. Forecasts are not actual revenue or profit. Government award amounts are shown separately and never used as deal values. Payment and checkout remain separately disabled until verified Stripe processing is implemented.</p>
     </div>
   </main>;
 }
