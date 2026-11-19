@@ -139,5 +139,89 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
     }
   });
 
+
+  // Discover real, publicly listed remote roles and previously collected SAM.gov notices.
+  // This is discovery only: no applications, bids, outreach, or paid work are submitted.
+  router.get('/opportunities/search', async (req, res) => {
+    const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
+    const terms = query.toLowerCase().split(/\\s+/).filter(Boolean);
+    const taskPattern = /data entry|data analyst|data engineer|research|market research|spreadsheet|virtual assistant|ai trainer|annotation|transcription|lead generation|web researcher|business intelligence|freelance|contractor|remote/i;
+    const taskId = await prisma.agentTaskRun.create({
+      data: { agentName: 'Opportunity Hunter', agentType: 'ai_agent', taskName: 'Search public paid-work opportunities', status: 'RUNNING', message: 'Searching public job listings and saved government notices.' },
+      select: { id: true },
+    }).catch(() => null);
+
+    try {
+      const remoteResponse = await fetch('https://remoteok.com/api', {
+        headers: { accept: 'application/json', 'user-agent': 'AI-Data-Marketplace/1.0 (opportunity discovery; contact: support@aidatamarketplacefinal.vercel.app)' },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!remoteResponse.ok) throw new Error(`RemoteOK returned HTTP ${remoteResponse.status}`);
+      const remotePayload = await remoteResponse.json() as Array<Record<string, unknown>>;
+      const remoteRows = Array.isArray(remotePayload) ? remotePayload.slice(1) : [];
+      const remoteJobs = remoteRows.flatMap((row) => {
+        const title = typeof row.position === 'string' ? row.position : '';
+        const company = typeof row.company === 'string' ? row.company : 'Company not listed';
+        const description = typeof row.description === 'string' ? row.description.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').slice(0, 500) : '';
+        const tags = Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === 'string') : [];
+        const searchable = `${title} ${company} ${description} ${tags.join(' ')}`.toLowerCase();
+        if (!title || !taskPattern.test(searchable) || (terms.length && !terms.every((term) => searchable.includes(term)))) return [];
+        const url = typeof row.url === 'string' ? row.url : (typeof row.id === 'string' ? `https://remoteok.com/remote-jobs/${row.id}` : 'https://remoteok.com');
+        const salary = [row.salary_min, row.salary_max].filter((value) => typeof value === 'number' && value > 0);
+        return [{
+          id: `remoteok:${String(row.id ?? url)}`, source: 'Remote OK', title, company, description,
+          location: typeof row.location === 'string' ? row.location : 'Remote',
+          url, postedAt: typeof row.date === 'string' ? row.date : null,
+          compensation: salary.length ? salary.map((value) => `${Number(value).toLocaleString()}`).join('–') : 'Not disclosed',
+          type: 'remote-role', applicationRequired: true,
+        }];
+      });
+
+      const samRecords = await prisma.supplierResearchRecord.findMany({
+        where: { source: 'sam.gov_opportunities' },
+        orderBy: { retrievedAt: 'desc' },
+        take: 100,
+        select: { sourceRecordId: true, supplierName: true, sourceUrl: true, payload: true, retrievedAt: true },
+      });
+      const samOpportunities = samRecords.flatMap((record) => {
+        const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+          ? record.payload as Record<string, unknown> : {};
+        const title = String(payload.title ?? payload.noticeTitle ?? payload.description ?? 'Federal solicitation').slice(0, 220);
+        const searchable = `${title} ${String(payload.description ?? '')} ${String(payload.naicsCode ?? '')}`.toLowerCase();
+        if (terms.length && !terms.every((term) => searchable.includes(term))) return [];
+        return [{
+          id: `sam.gov:${record.sourceRecordId}`, source: 'SAM.gov', title,
+          company: typeof payload.departmentName === 'string' ? payload.departmentName : 'U.S. federal agency',
+          description: String(payload.description ?? 'Review the official solicitation for scope, eligibility, deadlines, and award terms.').replace(/<[^>]*>/g, ' ').slice(0, 500),
+          location: typeof payload.placeOfPerformance === 'string' ? payload.placeOfPerformance : 'See official notice',
+          url: record.sourceUrl, postedAt: record.retrievedAt.toISOString(),
+          compensation: 'Contract value varies; see solicitation',
+          type: 'government-solicitation', applicationRequired: true,
+        }];
+      });
+
+      const opportunities = [...samOpportunities, ...remoteJobs].slice(0, 100);
+      if (taskId) await prisma.agentTaskRun.update({ where: { id: taskId }, data: {
+        status: 'COMPLETED', message: `Opportunity search completed: ${opportunities.length} matching public listings (${remoteJobs.length} Remote OK roles, ${samOpportunities.length} saved SAM.gov notices). Listings are leads to evaluate, not guaranteed work or income.`,
+        recordsFetched: remoteRows.length + samRecords.length, recordsSaved: 0, recordsFailed: 0, completedAt: new Date(),
+      } });
+      return res.json({
+        ok: true, opportunities,
+        sources: [
+          { name: 'Remote OK', url: 'https://remoteok.com', count: remoteJobs.length, note: 'Public remote job listings; apply through the original listing.' },
+          { name: 'SAM.gov', url: 'https://sam.gov/content/opportunities', count: samOpportunities.length, note: 'Previously collected notices only. Refresh remains subject to SAM.gov API authorization and source terms.' },
+        ],
+        note: 'Discovery only. Listings may expire or change. Verify pay, eligibility, deadlines, and terms on the source site. No applications, bids, outreach, or payments are automated.',
+      });
+    } catch (error) {
+      if (taskId) await prisma.agentTaskRun.update({ where: { id: taskId }, data: {
+        status: 'FAILED', message: error instanceof Error ? error.message.slice(0, 450) : 'Opportunity search failed.',
+        recordsFailed: 1, completedAt: new Date(),
+      } }).catch(() => undefined);
+      console.error('Opportunity search failed', error);
+      return res.status(502).json({ error: 'Could not retrieve public opportunities. Try again later.' });
+    }
+  });
+
   return router;
 }
