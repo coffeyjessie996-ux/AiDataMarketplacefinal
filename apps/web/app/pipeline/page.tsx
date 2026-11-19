@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 const stages = ['NEW', 'QUALIFIED', 'CONTACTED', 'PROPOSAL', 'WON', 'LOST'];
+const isWorkOpportunity = (source: string) => source === 'Remote OK' || source === 'SAM.gov';
 
 type RevenueSummary = {
   actualPaidOrderValueCents: number; actualPaidOrders: number;
@@ -244,28 +245,31 @@ export default function PipelinePage() {
               <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 260 }}><strong>{lead.companyName}</strong><div style={{ fontSize: 10, letterSpacing: 1, color: '#93c5fd', marginTop: 4 }}>{lead.source === 'Remote OK' ? 'PUBLIC JOB OPPORTUNITY' : lead.source === 'SAM.gov' ? 'GOVERNMENT SOLICITATION' : 'SUPPLIER RESEARCH RECORD'}</div><div style={{ fontSize: 12, color: '#93a4bd', marginTop: 4 }}>{lead.description || 'No additional award details supplied.'}</div><div style={{ fontSize: 11, color: '#8291a7', marginTop: 4 }}>Source: {lead.source} · Record: {lead.sourceRecordId || 'not supplied'}</div></td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', whiteSpace: 'nowrap' }}>{money(lead.awardAmount)}</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>
-                <input aria-label={`Expected deal value for ${lead.companyName}`} type="number" min="0" step="0.01"
-                  defaultValue={lead.expectedDealValueCents == null ? '' : (lead.expectedDealValueCents / 100).toFixed(2)}
-                  onBlur={e => { if (e.target.value !== (lead.expectedDealValueCents == null ? '' : (lead.expectedDealValueCents / 100).toFixed(2))) void saveForecast(lead, 'expectedDealValueCents', e.target.value); }}
-                  placeholder="Enter value" style={{ width: 120, padding: 7, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }} />
+                {isWorkOpportunity(lead.source) ? <span style={{ color: '#93a4bd', fontSize: 12 }}>Not applicable to work listings</span> :
+                  <input aria-label={`Expected deal value for ${lead.companyName}`} type="number" min="0" step="0.01"
+                    defaultValue={lead.expectedDealValueCents == null ? '' : (lead.expectedDealValueCents / 100).toFixed(2)}
+                    onBlur={e => { if (e.target.value !== (lead.expectedDealValueCents == null ? '' : (lead.expectedDealValueCents / 100).toFixed(2))) void saveForecast(lead, 'expectedDealValueCents', e.target.value); }}
+                    placeholder="Enter value" style={{ width: 120, padding: 7, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }} />}
               </td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>
-                <input aria-label={`Marketplace margin percentage for ${lead.companyName}`} type="number" min="0" max="100" step="0.5"
-                  defaultValue={String(lead.expectedMarginPercent ?? 20)}
-                  onBlur={e => { if (Number(e.target.value) !== (lead.expectedMarginPercent ?? 20)) void saveForecast(lead, 'expectedMarginPercent', e.target.value); }}
-                  style={{ width: 76, padding: 7, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }} />%
+                {isWorkOpportunity(lead.source) ? <span style={{ color: '#93a4bd', fontSize: 12 }}>Not applicable</span> :
+                  <><input aria-label={`Marketplace margin percentage for ${lead.companyName}`} type="number" min="0" max="100" step="0.5"
+                    defaultValue={String(lead.expectedMarginPercent ?? 20)}
+                    onBlur={e => { if (Number(e.target.value) !== (lead.expectedMarginPercent ?? 20)) void saveForecast(lead, 'expectedMarginPercent', e.target.value); }}
+                    style={{ width: 76, padding: 7, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }} />%</>}
               </td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', whiteSpace: 'nowrap' }}>
-                {lead.predictedProfitCents == null ? <span style={{ color: '#fbbf24' }}>Add deal estimate</span> :
-                  <><strong>{new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(lead.predictedProfitCents / 100)}</strong>
-                    <div style={{ fontSize: 11, color: '#93a4bd' }}>{lead.closeProbabilityPercent}% stage probability</div></>}
+                {isWorkOpportunity(lead.source) ? <span style={{ color: '#93a4bd', fontSize: 12 }}>Not a sales forecast</span> :
+                  lead.predictedProfitCents == null ? <span style={{ color: '#fbbf24' }}>Add deal estimate</span> :
+                    <><strong>{new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(lead.predictedProfitCents / 100)}</strong>
+                      <div style={{ fontSize: 11, color: '#93a4bd' }}>{lead.closeProbabilityPercent}% stage probability</div></>}
               </td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}>{lead.source === 'Remote OK' || lead.source === 'SAM.gov' ? (() => { try { const url = new URL(lead.website || ''); const allowed = lead.source === 'Remote OK' ? ['remoteok.com', 'www.remoteok.com'] : ['sam.gov', 'www.sam.gov']; return url.protocol === 'https:' && allowed.includes(url.hostname) ? <a href={url.toString()} target="_blank" rel="noreferrer" style={{ color: '#93c5fd' }}>View original opportunity</a> : <span style={{ color: '#fbbf24' }}>Original listing link unavailable</span>; } catch { return <span style={{ color: '#fbbf24' }}>Original listing link unavailable</span>; } })() : lead.email ? <a href={`mailto:${lead.email}`} style={{ color: '#93c5fd' }}>{lead.email}</a> : lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: '#93c5fd' }}>Company website</a> : lead.contactName ? <span>{lead.contactName}</span> : <span style={{ color: '#fbbf24' }}>Not provided by source</span>}</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}><strong>{lead.score}/100</strong><div style={{ color: '#93a4bd', fontSize: 11, marginTop: 4 }}>{(lead.priorityReasons || []).slice(0, 3).join(' · ')}</div>{lead.priorityBlockers?.length ? <div style={{ color: '#fbbf24', fontSize: 11, marginTop: 4 }}>{lead.priorityBlockers.slice(0, 2).join(' · ')}</div> : null}</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><select value={lead.stage} onChange={e => void changeStage(lead,e.target.value)} style={{ padding: 8, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }}>{stages.map(s => <option key={s} value={s}>{s}</option>)}</select></td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><input aria-label={`Follow-up date for ${lead.companyName}`} type="date" value={lead.nextFollowUpAt ? lead.nextFollowUpAt.slice(0,10) : ''} onChange={e => void changeFollowUp(lead,e.target.value)} style={{ padding: 7, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }} /></td>
-              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>{lead.source === 'Remote OK' || lead.source === 'SAM.gov' ? <span style={{ color: '#93a4bd', fontSize: 12 }}>Use official application process</span> : <button onClick={() => void createAiDraft(lead)} disabled={Boolean(draftBusy)} style={{ padding: '8px 10px', background: '#1d4ed8', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer' }}>{draftBusy === lead.id ? 'Drafting…' : 'Create AI draft'}</button>}</td>
-              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>{lead.source === 'Remote OK' || lead.source === 'SAM.gov' ? <span style={{ color: '#93a4bd', fontSize: 12 }}>Not a sales prospect</span> : <button onClick={() => void createClosePlan(lead)} disabled={Boolean(closeBusy)} style={{ padding: '8px 10px', background: '#0f766e', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer' }}>{closeBusy === lead.id ? 'Planning…' : 'Build close plan'}</button>}</td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>{isWorkOpportunity(lead.source) ? <span style={{ color: '#93a4bd', fontSize: 12 }}>Use official application process</span> : <button onClick={() => void createAiDraft(lead)} disabled={Boolean(draftBusy)} style={{ padding: '8px 10px', background: '#1d4ed8', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer' }}>{draftBusy === lead.id ? 'Drafting…' : 'Create AI draft'}</button>}</td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d' }}>{isWorkOpportunity(lead.source) ? <span style={{ color: '#93a4bd', fontSize: 12 }}>Not a sales prospect</span> : <button onClick={() => void createClosePlan(lead)} disabled={Boolean(closeBusy)} style={{ padding: '8px 10px', background: '#0f766e', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer' }}>{closeBusy === lead.id ? 'Planning…' : 'Build close plan'}</button>}</td>
             </tr>)}</tbody>
           </table></div>}
       </section>
