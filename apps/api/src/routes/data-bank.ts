@@ -110,6 +110,12 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
           payload.endDate,
           payload.postedDate,
           payload.responseDeadline,
+          payload.startTime,
+          payload.endTime,
+          payload.temperature,
+          payload.windSpeed,
+          payload.probabilityOfPrecipitation,
+          payload.shortForecast,
         ].filter(hasValue).length;
         return {
           ...record,
@@ -118,11 +124,13 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
             populatedFieldCount: usefulFields,
             hasSupplierName: Boolean(record.supplierName?.trim()),
             hasSourceLink: Boolean(record.sourceUrl),
-            classification: record.source === 'sam.gov_opportunities'
-              ? 'Government contract opportunity research'
-              : record.source === 'grants.gov_opportunities'
-                ? 'Federal grant opportunity research'
-                : 'Public supplier / award research',
+            classification: record.source === 'nws_api_forecasts'
+              ? 'NWS public-domain forecast periods'
+              : record.source === 'sam.gov_opportunities'
+                ? 'Government contract opportunity research'
+                : record.source === 'grants.gov_opportunities'
+                  ? 'Federal grant opportunity research'
+                  : 'Public supplier / award research',
           },
         };
       });
@@ -141,6 +149,118 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
   });
 
 
+
+  // Manually collect NWS-issued forecast periods. This excludes station observations and third-party feeds.
+  // The resulting dataset is always a private, restricted, $0 draft; publication requires seller review.
+  router.post('/nws-forecasts', async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    if (!['seller', 'admin'].includes(user.role)) return res.status(403).json({ error: 'A seller or admin account is required to collect data products.' });
+    if (!isCommercialReuseApproved('nws_api_forecasts')) {
+      return res.status(409).json({ error: 'NWS forecast source is not approved in the source-rights register.' });
+    }
+
+    const schema = z.object({
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+      locationLabel: z.string().trim().min(2).max(100),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Provide a location label and valid latitude/longitude.' });
+
+    try {
+      const headers = {
+        accept: 'application/geo+json',
+        'user-agent': 'AI-Data-Marketplace/1.0 (+https://aidatamarketplacefinal.vercel.app)',
+      };
+      const pointUrl = `https://api.weather.gov/points/${parsed.data.latitude},${parsed.data.longitude}`;
+      const pointResponse = await fetch(pointUrl, { headers, signal: AbortSignal.timeout(12000) });
+      if (!pointResponse.ok) return res.status(502).json({ error: `NWS point lookup failed (HTTP ${pointResponse.status}). Try again later.` });
+      const pointPayload = await pointResponse.json() as { properties?: { forecast?: string; gridId?: string; gridX?: number; gridY?: number } };
+      const forecastUrl = pointPayload.properties?.forecast;
+      if (!forecastUrl) return res.status(502).json({ error: 'NWS did not provide a point forecast URL for this location.' });
+      const validatedForecastUrl = new URL(forecastUrl);
+      if (validatedForecastUrl.protocol !== 'https:' || validatedForecastUrl.hostname !== 'api.weather.gov' || !validatedForecastUrl.pathname.includes('/gridpoints/')) {
+        return res.status(502).json({ error: 'NWS returned an unexpected forecast URL. No data was saved.' });
+      }
+
+      const forecastResponse = await fetch(validatedForecastUrl.toString(), { headers, signal: AbortSignal.timeout(12000) });
+      if (!forecastResponse.ok) return res.status(502).json({ error: `NWS forecast request failed (HTTP ${forecastResponse.status}).` });
+      const forecastPayload = await forecastResponse.json() as { properties?: { updateTime?: string; periods?: Array<Record<string, unknown>> } };
+      const periods = Array.isArray(forecastPayload.properties?.periods) ? forecastPayload.properties.periods.slice(0, 14) : [];
+      if (!periods.length) return res.status(502).json({ error: 'NWS returned no forecast periods. No data was saved.' });
+
+      const retrievedAt = new Date();
+      const records = await Promise.all(periods.map(async (period) => {
+        const startTime = String(period.startTime ?? '');
+        if (!startTime || Number.isNaN(Date.parse(startTime))) return null;
+        const sourceRecordId = `${parsed.data.latitude},${parsed.data.longitude}:${startTime}`;
+        const precipitation = period.probabilityOfPrecipitation && typeof period.probabilityOfPrecipitation === 'object'
+          ? (period.probabilityOfPrecipitation as Record<string, unknown>).value ?? null : null;
+        const payload = {
+          title: String(period.name ?? 'Forecast period').slice(0, 160),
+          description: String(period.shortForecast ?? 'NWS point forecast').slice(0, 500),
+          detailedForecast: String(period.detailedForecast ?? '').slice(0, 3000),
+          location: parsed.data.locationLabel,
+          latitude: parsed.data.latitude,
+          longitude: parsed.data.longitude,
+          startTime,
+          endTime: String(period.endTime ?? ''),
+          isDaytime: Boolean(period.isDaytime),
+          temperature: period.temperature ?? null,
+          temperatureUnit: String(period.temperatureUnit ?? ''),
+          windSpeed: String(period.windSpeed ?? ''),
+          windDirection: String(period.windDirection ?? ''),
+          probabilityOfPrecipitation: precipitation,
+          forecastUpdatedAt: forecastPayload.properties?.updateTime ?? null,
+          gridId: pointPayload.properties?.gridId ?? null,
+          gridX: pointPayload.properties?.gridX ?? null,
+          gridY: pointPayload.properties?.gridY ?? null,
+          attribution: 'National Weather Service (NWS), api.weather.gov. Public-domain government data; no NOAA/NWS endorsement.',
+          sourceTermsUrl: 'https://www.weather.gov/disclaimer',
+          retrievedAt: retrievedAt.toISOString(),
+        };
+        return prisma.supplierResearchRecord.upsert({
+          where: { source_sourceRecordId: { source: 'nws_api_forecasts', sourceRecordId } },
+          create: { source: 'nws_api_forecasts', sourceRecordId, supplierName: null, sourceUrl: validatedForecastUrl.toString(), payload, retrievedAt },
+          update: { sourceUrl: validatedForecastUrl.toString(), payload, retrievedAt },
+          select: { id: true },
+        });
+      }));
+      const savedRecords = records.filter((record): record is NonNullable<typeof record> => Boolean(record));
+      if (!savedRecords.length) return res.status(502).json({ error: 'NWS forecast periods did not contain valid start times. No dataset draft was created.' });
+
+      const title = `${parsed.data.locationLabel} - 7-Day Weather Planning Snapshot`.slice(0, 120);
+      const sourceRecordTags = savedRecords.map((record) => `source-record-id:${record.id}`);
+      const tags = ['factory:v1', 'license:review-required', 'source:nws_api_forecasts', ...sourceRecordTags];
+      const description = `A timestamped snapshot of up to 14 NWS-issued day/night forecast periods for ${parsed.data.locationLabel}. Includes forecast window, temperature, wind, precipitation probability, and source provenance. Forecasts change; this is operational planning data, not an official NWS product or guarantee. Source: api.weather.gov. NWS does not endorse this marketplace.`;
+      const existing = await prisma.dataset.findFirst({
+        where: { sellerId: user.id, title, tags: { has: 'source:nws_api_forecasts' }, status: 'DRAFT' },
+        select: { id: true },
+      });
+      const dataset = existing
+        ? await prisma.dataset.update({ where: { id: existing.id }, data: { description, tags, qualityScore: 90, sourceCount: 1, priceCents: 0, licenseType: 'RESTRICTED' } })
+        : await prisma.dataset.create({ data: {
+            sellerId: user.id, title, category: 'Weather & Operations', description,
+            priceCents: 0, qualityScore: 90, licenseType: 'RESTRICTED', sourceCount: 1,
+            status: 'DRAFT', tags,
+          } });
+
+      return res.status(201).json({
+        ok: true,
+        recordsSaved: savedRecords.length,
+        dataset: { id: dataset.id, title: dataset.title, status: 'draft', priceCents: 0, licenseType: 'restricted' },
+        source: 'nws_api_forecasts',
+        sourceUrl: validatedForecastUrl.toString(),
+        forecastUpdatedAt: forecastPayload.properties?.updateTime ?? null,
+        attribution: 'National Weather Service (NWS), api.weather.gov. NWS data is public domain unless specifically noted otherwise. No NOAA/NWS endorsement.',
+        note: 'Saved as a private draft only. No listing, price, auction, checkout, or payment was created.',
+      });
+    } catch (error) {
+      console.error('NWS forecast collection failed', error);
+      return res.status(502).json({ error: 'Unable to collect NWS forecasts right now. No listing or payment was created.' });
+    }
+  });
 
   router.get('/products', async (req: AuthReq, res) => {
     const user = req.user;
@@ -208,6 +328,8 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
           record.supplierName, record.sourceRecordId, record.sourceUrl,
           payload.title, payload.description, payload.awardAmount, payload.awardingAgency,
           payload.naics, payload.supplierUei, payload.startDate, payload.endDate,
+          payload.startTime, payload.endTime, payload.temperature, payload.windSpeed,
+          payload.probabilityOfPrecipitation,
         ].filter(hasValue).length;
       });
       const fieldCompleteness = populatedFields.reduce((sum, count) => sum + Math.min(count / 11, 1), 0) / records.length;
