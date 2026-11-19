@@ -17,6 +17,19 @@ export interface SourceRightsPolicy {
 }
 
 export const SOURCE_RIGHTS_POLICY: Readonly<Record<string, SourceRightsPolicy>> = Object.freeze({
+  'nws_api_forecasts': {
+    status: 'commercial_reuse_approved',
+    termsUrl: 'https://www.weather.gov/documentation/services-web-api',
+    reason: 'NWS API documentation explicitly states that API information is open data, free to use for any purpose. This approval is limited to NWS-issued point/grid forecast periods retrieved from api.weather.gov; it does not cover third-party station observations, third-party imagery, non-NWS material, or other NWS datasets without a separate review.',
+    attributionRequired: true,
+    operationalNotes: [
+      'Use only the api.weather.gov /points and linked /gridpoints/.../forecast endpoints with an identifying User-Agent and reasonable request frequency.',
+      'Show the NWS public-domain / non-endorsement notice and the forecast issue/valid times.',
+      'Do not claim NWS authorship for marketplace analysis, imply NOAA/NWS endorsement, or alter official forecast text and present it as an official NWS product.',
+      'Exclude station observations because many stations are not maintained by NWS and may contain third-party data.',
+      'Check the source response and its metadata for third-party content before each release.',
+    ],
+  },
   'usaspending.gov': {
     status: 'internal_research_only',
     termsUrl: '',
