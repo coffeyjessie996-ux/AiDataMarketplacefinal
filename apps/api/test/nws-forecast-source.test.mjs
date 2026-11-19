@@ -15,11 +15,12 @@ test('only NWS-issued point/grid forecasts receive narrow commercial reuse appro
   assert.match(register, /NWS API point\/grid forecasts/);
 });
 
-test('forecast collector requires a seller/admin and valid coordinates', () => {
+test('forecast collector requires authentication and valid coordinates but keeps the draft private', () => {
   const collector = route.split("router.post('/nws-forecasts'")[1]?.split("router.get('/products'")[0] ?? '';
-  assert.match(collector, /\['seller', 'admin'\]/);
+  assert.match(collector, /if \(!user\) return res\.status\(401\)/);
   assert.match(collector, /latitude: z\.number\(\)\.min\(-90\)\.max\(90\)/);
   assert.match(collector, /longitude: z\.number\(\)\.min\(-180\)\.max\(180\)/);
+  assert.match(collector, /status: 'DRAFT'/);
 });
 
 test('collector only follows HTTPS api.weather.gov grid forecast URLs', () => {

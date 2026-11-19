@@ -155,7 +155,7 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
   router.post('/nws-forecasts', async (req: AuthReq, res) => {
     const user = req.user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
-    if (!['seller', 'admin'].includes(user.role)) return res.status(403).json({ error: 'A seller or admin account is required to collect data products.' });
+    // Collection only creates a private, unpriced draft. Publishing remains seller/admin-only.
     if (!isCommercialReuseApproved('nws_api_forecasts')) {
       return res.status(409).json({ error: 'NWS forecast source is not approved in the source-rights register.' });
     }
