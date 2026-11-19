@@ -257,7 +257,7 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
         update: {},
         select: { id: true, companyName: true, source: true, stage: true, createdAt: true },
       });
-      return res.json({ ok: true, alreadySaved: lead.createdAt.getTime() < Date.now() - 5000, lead,
+      return res.json({ ok: true, lead,
         note: 'Saved as a new pipeline lead. This is not a confirmed buyer, contract, or earned revenue. No contact or application was sent.' });
     } catch (error) {
       console.error('Opportunity pipeline save failed', error);
