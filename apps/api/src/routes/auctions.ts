@@ -2,6 +2,7 @@ import express from 'express';
 import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
+import { isCommercialReuseApproved } from '../services/source-rights';
 
 type AuthReq = express.Request & { user?: User };
 
@@ -27,15 +28,21 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
       const auctions = await prisma.auction.findMany({
         where: { status: 'OPEN', closesAt: { gt: new Date() }, dataset: { status: 'PUBLISHED', licenseType: { not: 'RESTRICTED' } } },
         include: {
-          dataset: { select: { id: true, title: true, category: true, description: true, qualityScore: true, licenseType: true } },
+          dataset: { select: { id: true, title: true, category: true, description: true, qualityScore: true, licenseType: true, tags: true } },
           bids: { where: { status: 'ACTIVE' }, orderBy: [{ amountCents: 'desc' }, { createdAt: 'asc' }], take: 1, select: { amountCents: true } },
           _count: { select: { bids: true } },
         },
         orderBy: { closesAt: 'asc' },
         take: limit,
       });
+      const rightsApprovedAuctions = auctions.filter((auction) => {
+        const sources = auction.dataset.tags
+          .filter((tag) => tag.startsWith('source:'))
+          .map((tag) => tag.slice('source:'.length));
+        return sources.length > 0 && sources.every(isCommercialReuseApproved);
+      });
       return res.json({
-        auctions: auctions.map((auction) => ({
+        auctions: rightsApprovedAuctions.map((auction) => ({
           id: auction.id,
           dataset: auction.dataset,
           startingBidCents: auction.startingBidCents,
@@ -70,6 +77,10 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
       const dataset = await prisma.dataset.findUnique({ where: { id: parsed.data.datasetId } });
       if (!dataset || dataset.status !== 'PUBLISHED') return res.status(404).json({ error: 'Only an existing published dataset can be auctioned.' });
       if (dataset.licenseType === 'RESTRICTED') return res.status(400).json({ error: 'Restricted datasets cannot be auctioned.' });
+      const sourceNames = dataset.tags.filter((tag) => tag.startsWith('source:')).map((tag) => tag.slice('source:'.length));
+      if (!sourceNames.length || sourceNames.some((source) => !isCommercialReuseApproved(source))) {
+        return res.status(409).json({ error: 'Auction creation is blocked until commercial redistribution rights are approved for every source.' });
+      }
       if (user.role !== 'admin' && dataset.sellerId !== user.id) return res.status(403).json({ error: 'You can only auction your own dataset.' });
 
       const auction = await prisma.auction.create({
@@ -140,10 +151,14 @@ export function createAuctionsRouter(prisma: PrismaClient, auth: express.Request
         }
         const dataset = await tx.dataset.findUnique({
           where: { id: auction.datasetId },
-          select: { sellerId: true, status: true, licenseType: true },
+          select: { sellerId: true, status: true, licenseType: true, tags: true },
         });
         if (!dataset || dataset.status !== 'PUBLISHED' || dataset.licenseType === 'RESTRICTED') {
           return { error: 'This auction is not open for bidding.', status: 404 as const };
+        }
+        const sourceNames = dataset.tags.filter((tag) => tag.startsWith('source:')).map((tag) => tag.slice('source:'.length));
+        if (!sourceNames.length || sourceNames.some((source) => !isCommercialReuseApproved(source))) {
+          return { error: 'This auction is not open for bidding because source redistribution rights are not approved.', status: 404 as const };
         }
         if (dataset.sellerId === user.id) return { error: 'You cannot bid on your own dataset.', status: 403 as const };
         const highest = await tx.auctionBid.findFirst({
