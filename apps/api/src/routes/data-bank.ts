@@ -1,5 +1,5 @@
 import express from 'express';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import type { User } from '../types';
 import { z } from 'zod';
 import { isCommercialReuseApproved } from '../services/source-rights';
@@ -222,8 +222,8 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
         };
         return prisma.supplierResearchRecord.upsert({
           where: { source_sourceRecordId: { source: 'nws_api_forecasts', sourceRecordId } },
-          create: { source: 'nws_api_forecasts', sourceRecordId, supplierName: null, sourceUrl: validatedForecastUrl.toString(), payload, retrievedAt },
-          update: { sourceUrl: validatedForecastUrl.toString(), payload, retrievedAt },
+          create: { source: 'nws_api_forecasts', sourceRecordId, supplierName: null, sourceUrl: validatedForecastUrl.toString(), payload: payload as Prisma.InputJsonValue, retrievedAt },
+          update: { sourceUrl: validatedForecastUrl.toString(), payload: payload as Prisma.InputJsonValue, retrievedAt },
           select: { id: true },
         });
       }));
@@ -231,6 +231,15 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
       if (!savedRecords.length) return res.status(502).json({ error: 'NWS forecast periods did not contain valid start times. No dataset draft was created.' });
 
       const title = `${parsed.data.locationLabel} - 7-Day Weather Planning Snapshot`.slice(0, 120);
+      const validPeriods = periods.filter((period) => {
+        const startTime = String(period.startTime ?? '');
+        return Boolean(startTime) && !Number.isNaN(Date.parse(startTime));
+      });
+      const qualityScore = validPeriods.length
+        ? Math.round(validPeriods.reduce((sum, period) => sum + [
+            period.startTime, period.endTime, period.temperature, period.windSpeed, period.shortForecast,
+          ].filter(hasValue).length / 5, 0) / validPeriods.length * 100)
+        : 0;
       const sourceRecordTags = savedRecords.map((record) => `source-record-id:${record.id}`);
       const tags = ['factory:v1', 'license:review-required', 'source:nws_api_forecasts', ...sourceRecordTags];
       const description = `A timestamped snapshot of up to 14 NWS-issued day/night forecast periods for ${parsed.data.locationLabel}. Includes forecast window, temperature, wind, precipitation probability, and source provenance. Forecasts change; this is operational planning data, not an official NWS product or guarantee. Source: api.weather.gov. NWS does not endorse this marketplace.`;
@@ -239,10 +248,10 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
         select: { id: true },
       });
       const dataset = existing
-        ? await prisma.dataset.update({ where: { id: existing.id }, data: { description, tags, qualityScore: 90, sourceCount: 1, priceCents: 0, licenseType: 'RESTRICTED' } })
+        ? await prisma.dataset.update({ where: { id: existing.id }, data: { description, tags, qualityScore, sourceCount: 1, priceCents: 0, licenseType: 'RESTRICTED' } })
         : await prisma.dataset.create({ data: {
             sellerId: user.id, title, category: 'Weather & Operations', description,
-            priceCents: 0, qualityScore: 90, licenseType: 'RESTRICTED', sourceCount: 1,
+            priceCents: 0, qualityScore, licenseType: 'RESTRICTED', sourceCount: 1,
             status: 'DRAFT', tags,
           } });
 
