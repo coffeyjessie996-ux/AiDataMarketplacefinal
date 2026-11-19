@@ -102,6 +102,7 @@ export default function AgentActivityPage() {
           <div style={{ display: 'flex', gap: 16 }}>
             <a href="/data-bank" style={{ color: '#93c5fd', textDecoration: 'none' }}>AI Data Bank</a>
             <a href="/pipeline" style={{ color: '#93c5fd', textDecoration: 'none' }}>Sales pipeline</a>
+            <a href="/agents/opportunities" style={{ color: '#93c5fd', textDecoration: 'none' }}>Paid work opportunities</a>
           </div>
         </nav>
 
