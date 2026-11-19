@@ -18,6 +18,7 @@ type ClosePlan = { dealReadiness: string; qualificationGaps: string[]; likelyObj
 
 type Lead = {
   id: string; companyName: string; source: string; sourceRecordId?: string | null;
+  contactName?: string | null;
   email?: string | null; website?: string | null; description?: string | null;
   awardAmount?: string | number | null; expectedDealValueCents?: number | null;
   expectedMarginPercent?: number; closeProbabilityPercent?: number; predictedProfitCents?: number | null;
@@ -259,7 +260,7 @@ export default function PipelinePage() {
                   <><strong>{new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(lead.predictedProfitCents / 100)}</strong>
                     <div style={{ fontSize: 11, color: '#93a4bd' }}>{lead.closeProbabilityPercent}% stage probability</div></>}
               </td>
-              <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}>{lead.email ? <a href={`mailto:${lead.email}`} style={{ color: '#93c5fd' }}>{lead.email}</a> : lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: '#93c5fd' }}>Company website</a> : <span style={{ color: '#fbbf24' }}>Not provided by source</span>}</td>
+              <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}>{lead.email ? <a href={`mailto:${lead.email}`} style={{ color: '#93c5fd' }}>{lead.email}</a> : lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: '#93c5fd' }}>Company website</a> : lead.contactName ? <span>{lead.contactName}</span> : <span style={{ color: '#fbbf24' }}>Not provided by source</span>}</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d', minWidth: 180 }}><strong>{lead.score}/100</strong><div style={{ color: '#93a4bd', fontSize: 11, marginTop: 4 }}>{(lead.priorityReasons || []).slice(0, 3).join(' · ')}</div>{lead.priorityBlockers?.length ? <div style={{ color: '#fbbf24', fontSize: 11, marginTop: 4 }}>{lead.priorityBlockers.slice(0, 2).join(' · ')}</div> : null}</td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><select value={lead.stage} onChange={e => void changeStage(lead,e.target.value)} style={{ padding: 8, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }}>{stages.map(s => <option key={s} value={s}>{s}</option>)}</select></td>
               <td style={{ padding: 12, borderTop: '1px solid #26364d' }}><input aria-label={`Follow-up date for ${lead.companyName}`} type="date" value={lead.nextFollowUpAt ? lead.nextFollowUpAt.slice(0,10) : ''} onChange={e => void changeFollowUp(lead,e.target.value)} style={{ padding: 7, background: '#172033', color: 'white', border: '1px solid #334155', borderRadius: 6 }} /></td>
