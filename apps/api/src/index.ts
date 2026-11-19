@@ -47,6 +47,7 @@ app.use((req, _res, next) => {
 function hasValidDatabaseUrl() {
   const urls = [
     process.env.DATABASE_URL,
+    process.env.supabase_connection_string,
     process.env.SUPABASE_POOLER_URL,
     process.env.POSTGRES_PRISMA_URL,
   ];
