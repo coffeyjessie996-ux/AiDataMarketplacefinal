@@ -6,6 +6,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate --schema=prisma/schema.prisma && tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "test": "node --test test/*.test.mjs",
     "prisma:generate": "prisma generate --schema=prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --name init --schema=prisma/schema.prisma",
     "prisma:seed": "tsx prisma/seed.ts",

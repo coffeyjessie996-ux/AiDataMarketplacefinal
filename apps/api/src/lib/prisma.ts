@@ -8,6 +8,7 @@ const globalForPrisma = globalThis as unknown as {
 // placeholder DATABASE_URL must not hide a valid Supabase pooler fallback.
 const databaseUrl = [
   process.env.DATABASE_URL,
+  process.env.supabase_connection_string,
   process.env.SUPABASE_POOLER_URL,
   process.env.POSTGRES_PRISMA_URL,
 ]
