@@ -41,6 +41,24 @@ export default function OpportunitiesPage() {
     } finally { setBusy(false); }
   }
 
+  async function saveOpportunity(item: Opportunity) {
+    setSaving(item.id); setError('');
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('Please sign in first.');
+      const response = await fetch(`${API}/agents/opportunities/save`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Could not save this opportunity.');
+      setSaved(current => current.includes(item.id) ? current : [...current, item.id]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save this opportunity.');
+    } finally { setSaving(null); }
+  }
+
   return (
     <main style={{ minHeight: '100vh', padding: '28px 18px', background: '#0b1220', color: '#e5edf8' }}>
       <div style={{ maxWidth: 1120, margin: '0 auto' }}>
