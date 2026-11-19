@@ -45,7 +45,7 @@ export default function AgentActivityPage() {
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState('');
   const [runningAgent, setRunningAgent] = useState('');
-  const [agentResult, setAgentResult] = useState('');
+  const [runFeedback, setRunFeedback] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -68,7 +68,7 @@ export default function AgentActivityPage() {
   }, []);
 
   const runAgent = async (agentId: string) => {
-    setRunningAgent(agentId); setAgentResult(''); setError('');
+    setRunningAgent(agentId); setRunFeedback('Button press received. Sending the agent request…'); setError('');
     try {
       const token = localStorage.getItem('auth_token');
       if (!token) throw new Error('Please sign in first.');
@@ -79,10 +79,12 @@ export default function AgentActivityPage() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'Agent task failed.');
-      setAgentResult(result.message || 'Agent task completed.');
+      setRunFeedback(result.message || 'Agent task completed successfully.');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Agent task failed.');
+      const message = err instanceof Error ? err.message : 'Agent task failed.';
+      setRunFeedback(`The request did not complete: ${message}`);
+      setError(message);
     } finally {
       setRunningAgent('');
     }
@@ -127,7 +129,7 @@ export default function AgentActivityPage() {
               <button disabled={Boolean(runningAgent)} onClick={() => void runAgent(agent.id)} style={{ padding: '9px 12px', border: 0, borderRadius: 7, background: runningAgent === agent.id ? '#475569' : '#2563eb', color: 'white', cursor: runningAgent ? 'wait' : 'pointer' }}>{runningAgent === agent.id ? 'Running…' : 'Run agent'}</button>
             </article>)}
           </div>
-          {agentResult && <p role="status" style={{ marginTop: 14, padding: 12, background: '#123329', borderRadius: 8, color: '#bbf7d0', lineHeight: 1.5 }}>{agentResult}</p>}
+          {runFeedback && <p role="status" aria-live="polite" style={{ marginTop: 14, padding: 12, background: runFeedback.startsWith('The request did not complete:') ? '#451a1a' : '#123329', borderRadius: 8, color: runFeedback.startsWith('The request did not complete:') ? '#fecaca' : '#bbf7d0', lineHeight: 1.5 }}>{runFeedback}</p>}
         </section>
 
         {data && <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12, marginBottom: 18 }}>
