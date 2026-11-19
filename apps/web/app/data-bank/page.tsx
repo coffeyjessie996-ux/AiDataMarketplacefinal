@@ -59,6 +59,12 @@ export default function DataBankPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [collectingWeather, setCollectingWeather] = useState(false);
+  const [weatherMessage, setWeatherMessage] = useState('');
+  const [weatherError, setWeatherError] = useState('');
+  const [weatherLocation, setWeatherLocation] = useState('Charlotte, NC');
+  const [weatherLatitude, setWeatherLatitude] = useState('35.2271');
+  const [weatherLongitude, setWeatherLongitude] = useState('-80.8431');
 
   const headers = () => {
     const token = localStorage.getItem('auth_token');
@@ -95,8 +101,35 @@ export default function DataBankPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const sourceLabel = (value: string) => value === 'usaspending.gov'
-    ? 'USAspending.gov'
+  const collectWeather = async () => {
+    setCollectingWeather(true);
+    setWeatherMessage('');
+    setWeatherError('');
+    try {
+      const response = await fetch(`${API}/data-bank/nws-forecasts`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          locationLabel: weatherLocation.trim(),
+          latitude: Number(weatherLatitude),
+          longitude: Number(weatherLongitude),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not collect NWS forecast data.');
+      setWeatherMessage(`Saved ${data.recordsSaved} forecast periods and created/updated the private draft “${data.dataset.title}”.`);
+      await load();
+    } catch (err) {
+      setWeatherError(err instanceof Error ? err.message : 'Could not collect NWS forecast data.');
+    } finally {
+      setCollectingWeather(false);
+    }
+  };
+
+  const sourceLabel = (value: string) => value === 'nws_api_forecasts'
+    ? 'NWS point forecasts'
+    : value === 'usaspending.gov'
+      ? 'USAspending.gov'
     : value === 'sam.gov_opportunities'
       ? 'SAM.gov opportunities'
       : value === 'grants.gov_opportunities'
@@ -165,6 +198,30 @@ export default function DataBankPage() {
 
         {error && <p role="alert" style={{ background: '#451a1a', color: '#fecaca', borderRadius: 8, padding: 12 }}>{error}</p>}
 
+        <section style={{ background: '#101a2b', border: '1px solid #31506f', borderRadius: 12, padding: 16, marginBottom: 18 }}>
+          <h2 style={{ margin: '0 0 8px', fontSize: 18 }}>Build a licensed weather-data draft</h2>
+          <p style={{ color: '#a8b6ca', fontSize: 13, lineHeight: 1.6, margin: '0 0 12px' }}>
+            Collect up to 14 NWS-issued forecast periods through the official API. This creates a private, restricted, $0 draft with source IDs and timestamps. It does not publish or charge anyone.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10 }}>
+            <label style={{ display: 'grid', gap: 5, fontSize: 12, color: '#cbd5e1' }}>Location label
+              <input value={weatherLocation} onChange={e => setWeatherLocation(e.target.value)} maxLength={100} style={{ padding: 10, borderRadius: 7, background: '#111a2b', color: 'white', border: '1px solid #334155' }} />
+            </label>
+            <label style={{ display: 'grid', gap: 5, fontSize: 12, color: '#cbd5e1' }}>Latitude
+              <input type="number" min="-90" max="90" step="any" value={weatherLatitude} onChange={e => setWeatherLatitude(e.target.value)} style={{ padding: 10, borderRadius: 7, background: '#111a2b', color: 'white', border: '1px solid #334155' }} />
+            </label>
+            <label style={{ display: 'grid', gap: 5, fontSize: 12, color: '#cbd5e1' }}>Longitude
+              <input type="number" min="-180" max="180" step="any" value={weatherLongitude} onChange={e => setWeatherLongitude(e.target.value)} style={{ padding: 10, borderRadius: 7, background: '#111a2b', color: 'white', border: '1px solid #334155' }} />
+            </label>
+          </div>
+          <button onClick={() => void collectWeather()} disabled={collectingWeather || !weatherLocation.trim() || !Number.isFinite(Number(weatherLatitude)) || !Number.isFinite(Number(weatherLongitude)) || Number(weatherLatitude) < -90 || Number(weatherLatitude) > 90 || Number(weatherLongitude) < -180 || Number(weatherLongitude) > 180} style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, border: 0, background: '#1d4ed8', color: 'white', fontWeight: 700 }}>
+            {collectingWeather ? 'Collecting official forecast…' : 'Collect NWS forecast & create draft'}
+          </button>
+          {weatherMessage && <p role="status" style={{ color: '#86efac', fontSize: 13, marginTop: 10 }}>{weatherMessage}</p>}
+          {weatherError && <p role="alert" style={{ color: '#fecaca', fontSize: 13, marginTop: 10 }}>{weatherError}</p>}
+          <p style={{ color: '#8291a7', fontSize: 11, lineHeight: 1.5, marginTop: 10 }}>Source: National Weather Service API. NWS data is public domain unless noted otherwise; no NOAA/NWS endorsement. Third-party station observations are excluded. Forecasts can change and are not guaranteed.</p>
+        </section>
+
         <section style={{ border: '1px solid #26364d', borderRadius: 12, overflow: 'hidden', background: '#101a2b' }}>
           <div style={{ padding: 14, borderBottom: '1px solid #26364d', display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
             <strong>Research library</strong>
@@ -197,7 +254,7 @@ export default function DataBankPage() {
                   <td style={{ padding: 12, borderBottom: '1px solid #26364d', whiteSpace: 'nowrap' }}>{sourceLabel(record.source)}</td>
                   <td style={{ padding: 12, borderBottom: '1px solid #26364d', whiteSpace: 'nowrap' }}>{amount}</td>
                   <td style={{ padding: 12, borderBottom: '1px solid #26364d' }}>
-                    <span style={{ color: record.quality.hasSupplierName ? '#86efac' : '#fbbf24' }}>{record.quality.hasSupplierName ? 'Named supplier' : 'Name missing'}</span>
+                    <span style={{ color: record.source === 'nws_api_forecasts' || record.quality.hasSupplierName ? '#86efac' : '#fbbf24' }}>{record.source === 'nws_api_forecasts' ? 'Forecast period' : record.quality.hasSupplierName ? 'Named supplier' : 'Name missing'}</span>
                     <div style={{ color: '#93a4bd', fontSize: 11, marginTop: 4 }}>{record.quality.populatedFieldCount} useful fields</div>
                     <div style={{ color: '#8291a7', fontSize: 11 }}>{record.quality.classification}</div>
                   </td>
@@ -215,7 +272,7 @@ export default function DataBankPage() {
         </section>
 
         <p style={{ color: '#8291a7', fontSize: 12, lineHeight: 1.6, marginTop: 16 }}>
-          Data Bank quality indicators measure field completeness only. They do not independently verify a company, prove contactability, grant resale rights, or predict sales. SAM.gov solicitation records are opportunity research, not supplier endorsements or buyer leads. Check each source’s terms before creating a commercial data product.
+          Data Bank quality indicators measure field completeness only. They do not independently verify a company, prove contactability, grant resale rights, or predict sales. NWS forecast records contain NWS-issued point forecasts only; do not treat them as guaranteed predictions or imply NOAA/NWS endorsement. SAM.gov solicitation records are opportunity research, not supplier endorsements or buyer leads. Check each source’s terms before creating a commercial data product.
         </p>
       </div>
     </main>
