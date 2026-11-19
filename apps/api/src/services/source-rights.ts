@@ -19,7 +19,7 @@ export interface SourceRightsPolicy {
 export const SOURCE_RIGHTS_POLICY: Readonly<Record<string, SourceRightsPolicy>> = Object.freeze({
   'usaspending.gov': {
     status: 'internal_research_only',
-    termsUrl: 'https://www.usaspending.gov/',
+    termsUrl: '',
     reason: 'Public award records may be researched, but this project has not completed a source-specific redistribution and commercial resale review for the exact fields and any third-party material.',
     operationalNotes: ['Keep records internal; do not publish or sell derived record bundles until counsel/source review approves the exact use.'],
   },
