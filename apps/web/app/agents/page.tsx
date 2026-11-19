@@ -44,6 +44,8 @@ export default function AgentActivityPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState('');
+  const [runningAgent, setRunningAgent] = useState('');
+  const [agentResult, setAgentResult] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -89,6 +91,22 @@ export default function AgentActivityPage() {
             View actual scheduled collector runs and public-record research triage tasks. This feed refreshes automatically every five seconds; it is not a claim that autonomous multi-agent sales or research teams are connected.
           </p>
         </header>
+
+        <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16, marginBottom: 18 }}>
+          <h2 style={{ marginTop: 0 }}>Marketplace AI workforce</h2>
+          <p style={{ color: '#a8b6ca', lineHeight: 1.55 }}>Run three controlled agents against records already stored in your marketplace. These first jobs are read-only: they do not scrape websites, send emails, publish datasets, spend money, or create sales.</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }}>
+            {[
+              { id: 'research_opportunity_scan', title: '1. Research & opportunity finder', detail: 'Review saved research records and source coverage.' },
+              { id: 'data_rights_audit', title: '2. Data production & rights audit', detail: 'Check datasets, listings, auctions, and source approval.' },
+              { id: 'buyer_pipeline_audit', title: '3. Buyer & sales support', detail: 'Summarize buyer inquiries and lead stages.' },
+            ].map(agent => <article key={agent.id} style={{ background: '#17263a', border: '1px solid #334155', borderRadius: 9, padding: 14 }}>
+              <strong>{agent.title}</strong><p style={{ color: '#a8b6ca', minHeight: 42, fontSize: 13 }}>{agent.detail}</p>
+              <button disabled={Boolean(runningAgent)} onClick={() => void runAgent(agent.id)} style={{ padding: '9px 12px', border: 0, borderRadius: 7, background: runningAgent === agent.id ? '#475569' : '#2563eb', color: 'white', cursor: runningAgent ? 'wait' : 'pointer' }}>{runningAgent === agent.id ? 'Running…' : 'Run agent'}</button>
+            </article>)}
+          </div>
+          {agentResult && <p role="status" style={{ marginTop: 14, padding: 12, background: '#123329', borderRadius: 8, color: '#bbf7d0', lineHeight: 1.5 }}>{agentResult}</p>}
+        </section>
 
         {data && <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12, marginBottom: 18 }}>
           <div style={{ background: '#101a2b', border: '1px solid #26364d', borderRadius: 10, padding: 16 }}>
