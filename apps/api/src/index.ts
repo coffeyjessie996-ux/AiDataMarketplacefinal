@@ -21,6 +21,7 @@ import { createOperationsRouter } from './routes/operations';
 import { createAuctionsRouter } from './routes/auctions';
 import { finishAgentTask, startAgentTask } from './services/agent-activity';
 import { upsertResearchRecordPreservingAnalysis } from './services/research-records';
+import { isCommercialReuseApproved } from './services/source-rights';
 
 dotenv.config();
 
@@ -683,12 +684,12 @@ app.post('/datasets', requireAuth, requireRole(['seller', 'admin']), async (req,
       title: parsed.data.title,
       category: parsed.data.category,
       description: parsed.data.description,
-      priceCents: parsed.data.priceCents,
+      priceCents: 0,
       qualityScore: parsed.data.qualityScore,
-      licenseType: parsed.data.licenseType.toUpperCase() as any,
+      licenseType: 'RESTRICTED',
       sourceCount: parsed.data.sourceCount,
-      status: parsed.data.status.toUpperCase() as any,
-      tags: parsed.data.tags,
+      status: 'DRAFT',
+      tags: [...parsed.data.tags, 'license:review-required', 'rights-review:pending'],
     },
   });
 
@@ -1005,6 +1006,14 @@ app.post('/orders', requireAuth, async (req, res) => {
     });
     if (availableRecordCount !== includedRecordIds.length) {
       return res.status(409).json({ error: 'This delivery currently supports only complete USAspending record sets.' });
+    }
+    const sourceNames = dataset.tags
+      .filter((tag) => tag.startsWith('source:'))
+      .map((tag) => tag.slice('source:'.length));
+    if (!sourceNames.length || sourceNames.some((source) => !isCommercialReuseApproved(source))) {
+      return res.status(409).json({
+        error: 'Checkout is blocked because commercial redistribution rights have not been approved for every source in this dataset.',
+      });
     }
     if (dataset.sellerId === user.id) return res.status(400).json({ error: 'You cannot purchase your own dataset.' });
 
