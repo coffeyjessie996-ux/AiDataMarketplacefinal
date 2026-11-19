@@ -34,5 +34,6 @@ test('sales pipeline identifies opportunity types and links to original listings
 
 test('sales pipeline does not present saved opportunities as confirmed buyers or revenue', () => {
   assert.match(uiSource, /not a confirmed buyer, contract award to you, or earned revenue/i);
-  assert.match(uiSource, /not sales or forecast revenue/i);
+  assert.match(uiSource, /Forecasts are not actual revenue or profit/i);
+  assert.match(uiSource, /Government award amounts are shown separately/i);
 });
