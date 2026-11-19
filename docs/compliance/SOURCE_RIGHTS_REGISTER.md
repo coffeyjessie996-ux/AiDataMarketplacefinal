@@ -39,6 +39,26 @@ A seller's attestation or a link to a terms page is not, by itself, a legal dete
 - BLS API Terms of Service: https://www.bls.gov/developers/termsOfService.htm
 - GovInfo public-domain and copyright notice: https://www.govinfo.gov/about/policies
 
+## Sales outreach and personal-data safeguards
+
+No automated outbound marketing email is enabled. Before enabling it, implement and test all of the following:
+
+- Use accurate sender/from and routing details and truthful subject lines.
+- Clearly identify commercial messages as advertisements and include a valid physical postal address.
+- Include a clear, working opt-out method in every commercial email, including business-to-business messages.
+- Keep a suppression list and honor opt-outs within 10 business days; do not sell or transfer opted-out addresses except to a service provider acting to maintain compliance.
+- Do not use harvested or guessed email addresses, purchased lists of uncertain origin, or dictionary-generated addresses.
+- Review contact-data provenance and permitted purpose before outreach; do not treat government contracting-officer points of contact as sales prospects.
+- Collect only personal information needed for the service, restrict access, define retention/deletion periods, and secure the information.
+
+The FTC says CAN-SPAM applies to commercial email, including business-to-business messages, and makes both the promoted business and the sending provider potentially responsible. These controls are launch blockers, not optional enhancements.
+
+Official guidance:
+- FTC CAN-SPAM compliance guide: https://www.ftc.gov/business-guidance/resources/can-spam-act-compliance-guide-business
+- FTC Protecting Personal Information guide: https://www.ftc.gov/business-guidance/resources/protecting-personal-information-guide-business
+
+Other federal, state, and international privacy or marketing laws may apply depending on the people, data, and jurisdictions involved. Obtain qualified legal review before activating campaigns or selling identifiable contact data.
+
 ## Engineering enforcement
 
 - New datasets created through the general API are forced to DRAFT, RESTRICTED, and $0.
