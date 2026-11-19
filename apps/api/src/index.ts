@@ -710,6 +710,27 @@ app.post('/scrapers/start', requireAuth, async (req, res) => {
     });
   }
 
+  // Public availability does not itself grant permission to scrape or retain page content.
+  // Require exact hostnames to be reviewed for terms, robots guidance, and permitted use.
+  const allowedHosts = (process.env.PUBLIC_WEB_SCRAPE_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+  if (!allowedHosts.length) {
+    return res.status(503).json({
+      error: 'Public web scraping is paused until website terms, robots guidance, and collection permissions are reviewed and approved hostnames are configured.',
+    });
+  }
+  const unapprovedHosts = [...new Set(parsed.data.urls
+    .map((value) => new URL(value).hostname.toLowerCase())
+    .filter((hostname) => !allowedHosts.includes(hostname)))];
+  if (unapprovedHosts.length) {
+    return res.status(403).json({
+      error: 'One or more URLs use a hostname that has not been approved for collection.',
+      blockedHostCount: unapprovedHosts.length,
+    });
+  }
+
   const taskId = await startAgentTask(prisma, 'Public web scraper', 'Fetch and store submitted public web pages');
   try {
     const results = await scrapeSources(parsed.data.urls);

@@ -65,5 +65,6 @@ Other federal, state, and international privacy or marketing laws may apply depe
 - Product Factory publication, Stripe checkout, auction creation, auction discovery, and bidding require every source to be explicitly marked `commercial_reuse_approved` in `apps/api/src/services/source-rights.ts`.
 - The approved source set is intentionally empty until a documented review is completed.
 - SAM.gov scheduled opportunity collection is paused unless a separate server-side feature flag is explicitly enabled after authorization and rights review.
+- Generic webpage collection requires exact hostnames in `PUBLIC_WEB_SCRAPE_ALLOWED_HOSTS`; the list must be populated only after terms, robots guidance, and permission are reviewed. Empty means scraping is paused.
 - SAM.gov point-of-contact fields are not persisted as sales contact data.
 - Do not change a source to approved solely to unblock sales. Record the evidence and obtain legal review first.
