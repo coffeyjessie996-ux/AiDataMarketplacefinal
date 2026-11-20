@@ -5,6 +5,14 @@ import { useCallback, useEffect, useState } from 'react';
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 type SourceSummary = { source: string; count: number; latestRetrievedAt: string | null };
+type WeatherBrief = {
+  datasetTitle: string; location: string; generatedAt: string; forecastUpdatedAt: string | null;
+  retrievedAt: string; periodCount: number;
+  summary: { minTemperature: number | null; maxTemperature: number | null; maxPrecipitationChance: number | null; maxWindMph: number | null };
+  planningFlags: string[];
+  periods: Array<{ id: string; period: string; startTime: string; endTime: string; temperature: number | null; temperatureUnit: string; shortForecast: string; windSpeed: string; windDirection: string; precipitationChance: number | null; detailedForecast: string; sourceUrl: string }>;
+  source: string; sourceTermsUrl: string; sourceUrl: string | null; disclaimer: string;
+};
 type Summary = {
   totalRecords: number;
   sourceCount: number;
@@ -62,6 +70,8 @@ export default function DataBankPage() {
   const [collectingWeather, setCollectingWeather] = useState(false);
   const [weatherMessage, setWeatherMessage] = useState('');
   const [weatherError, setWeatherError] = useState('');
+  const [weatherBrief, setWeatherBrief] = useState<WeatherBrief | null>(null);
+  const [weatherBriefError, setWeatherBriefError] = useState('');
   const [weatherLocation, setWeatherLocation] = useState('Charlotte, NC');
   const [weatherLatitude, setWeatherLatitude] = useState('35.2271');
   const [weatherLongitude, setWeatherLongitude] = useState('-80.8431');
@@ -80,20 +90,26 @@ export default function DataBankPage() {
       const params = new URLSearchParams({ page: String(page), limit: '25' });
       if (query.trim()) params.set('q', query.trim());
       if (source) params.set('source', source);
-      const [summaryResponse, recordsResponse] = await Promise.all([
+      const [summaryResponse, recordsResponse, briefResponse] = await Promise.all([
         fetch(`${API}/data-bank/summary`, { headers: authHeaders }),
         fetch(`${API}/data-bank/records?${params.toString()}`, { headers: authHeaders }),
+        fetch(`${API}/data-bank/weather-brief`, { headers: authHeaders }),
       ]);
       const summaryData = await summaryResponse.json();
       const recordsData = await recordsResponse.json();
+      const briefData = briefResponse.status === 404 ? null : await briefResponse.json();
       if (!summaryResponse.ok) throw new Error(summaryData.error || 'Could not load Data Bank summary.');
       if (!recordsResponse.ok) throw new Error(recordsData.error || 'Could not load Data Bank records.');
+      if (!briefResponse.ok && briefResponse.status !== 404) throw new Error(briefData?.error || 'Could not load the weather planning brief.');
       setSummary(summaryData);
+      setWeatherBrief(briefData?.brief ?? null);
+      setWeatherBriefError('');
       setRecords(Array.isArray(recordsData.records) ? recordsData.records : []);
       setTotal(Number(recordsData.total || 0));
       setPageCount(Math.max(1, Number(recordsData.pageCount || 1)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load Data Bank.');
+      setWeatherBriefError('The weather planning brief could not be loaded.');
     } finally {
       setLoading(false);
     }
@@ -221,6 +237,37 @@ export default function DataBankPage() {
           {weatherError && <p role="alert" style={{ color: '#fecaca', fontSize: 13, marginTop: 10 }}>{weatherError}</p>}
           <p style={{ color: '#8291a7', fontSize: 11, lineHeight: 1.5, marginTop: 10 }}>Source: National Weather Service API. NWS data is public domain unless noted otherwise; no NOAA/NWS endorsement. Third-party station observations are excluded. Forecasts can change and are not guaranteed.</p>
         </section>
+
+        {weatherBrief && <section id="weather-operations-brief" style={{ background: '#101a2b', border: '1px solid #31506f', borderRadius: 12, padding: 18, marginBottom: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <p style={{ color: '#60a5fa', letterSpacing: 1.5, fontSize: 11, fontWeight: 700, margin: 0 }}>VALUE-ADDED RESEARCH REPORT</p>
+              <h2 style={{ margin: '6px 0', fontSize: 21 }}>Weather operations planning brief</h2>
+              <p style={{ color: '#a8b6ca', fontSize: 13, margin: 0 }}>{weatherBrief.location} · {weatherBrief.periodCount} forecast periods</p>
+            </div>
+            <button onClick={() => window.print()} style={{ padding: '9px 13px', borderRadius: 8, border: '1px solid #42617f', background: '#17263a', color: 'white', fontWeight: 700 }}>Print / save as PDF</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10, margin: '16px 0' }}>
+            <div style={{ background: '#17263a', borderRadius: 8, padding: 12 }}><div style={{ color: '#93a4bd', fontSize: 11 }}>Temperature range</div><strong>{weatherBrief.summary.minTemperature ?? '—'}° to {weatherBrief.summary.maxTemperature ?? '—'}° F</strong></div>
+            <div style={{ background: '#17263a', borderRadius: 8, padding: 12 }}><div style={{ color: '#93a4bd', fontSize: 11 }}>Highest precipitation chance</div><strong>{weatherBrief.summary.maxPrecipitationChance === null ? '—' : `${weatherBrief.summary.maxPrecipitationChance}%`}</strong></div>
+            <div style={{ background: '#17263a', borderRadius: 8, padding: 12 }}><div style={{ color: '#93a4bd', fontSize: 11 }}>Highest listed wind</div><strong>{weatherBrief.summary.maxWindMph === null ? '—' : `${weatherBrief.summary.maxWindMph} mph`}</strong></div>
+            <div style={{ background: '#17263a', borderRadius: 8, padding: 12 }}><div style={{ color: '#93a4bd', fontSize: 11 }}>Forecast last updated</div><strong style={{ fontSize: 12 }}>{formatDate(weatherBrief.forecastUpdatedAt)}</strong></div>
+          </div>
+          {weatherBrief.planningFlags.length > 0 ? <div style={{ border: '1px solid #8a6731', background: '#332817', borderRadius: 8, padding: 12, marginBottom: 12 }}><strong style={{ color: '#fcd34d', fontSize: 12 }}>PLANNING ITEMS TO REVIEW</strong>{weatherBrief.planningFlags.map((flag, index) => <p key={index} style={{ color: '#fef3c7', fontSize: 12, lineHeight: 1.5, margin: '6px 0 0' }}>{flag}</p>)}</div> : <p style={{ color: '#86efac', fontSize: 12 }}>No threshold-based planning flags were triggered by the saved forecast fields. This does not mean conditions are risk-free.</p>}
+          <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', minWidth: 620, borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead><tr style={{ textAlign: 'left', color: '#93a4bd' }}>{['Forecast period', 'Temperature', 'Wind', 'Precipitation', 'Conditions'].map(label => <th key={label} style={{ padding: 9, borderBottom: '1px solid #334155' }}>{label}</th>)}</tr></thead>
+            <tbody>{weatherBrief.periods.map(period => <tr key={period.id}>
+              <td style={{ padding: 9, borderBottom: '1px solid #26364d' }}>{period.period}<div style={{ color: '#8291a7' }}>{formatDate(period.startTime)}</div></td>
+              <td style={{ padding: 9, borderBottom: '1px solid #26364d' }}>{period.temperature === null ? '—' : `${period.temperature}° ${period.temperatureUnit}`}</td>
+              <td style={{ padding: 9, borderBottom: '1px solid #26364d' }}>{period.windSpeed} {period.windDirection}</td>
+              <td style={{ padding: 9, borderBottom: '1px solid #26364d' }}>{period.precipitationChance === null ? '—' : `${period.precipitationChance}%`}</td>
+              <td style={{ padding: 9, borderBottom: '1px solid #26364d' }}>{period.shortForecast}</td>
+            </tr>)}</tbody>
+          </table></div>
+          <p style={{ color: '#8291a7', fontSize: 11, lineHeight: 1.5, marginBottom: 0 }}>Source: {weatherBrief.source}. Forecast retrieved {formatDate(weatherBrief.retrievedAt)}. <a href={weatherBrief.sourceTermsUrl} target="_blank" rel="noreferrer" style={{ color: '#93c5fd' }}>NWS terms and disclaimer</a>. {weatherBrief.disclaimer}</p>
+          <p style={{ color: '#8291a7', fontSize: 10, marginTop: 8 }}>Draft report only. Private, unpublished, $0, and not cleared for redistribution. Generated: {formatDate(weatherBrief.generatedAt)}.</p>
+        </section>}
+        {weatherBriefError && <p role="alert" style={{ color: '#fecaca', fontSize: 12 }}>{weatherBriefError}</p>}
 
         <section style={{ border: '1px solid #26364d', borderRadius: 12, overflow: 'hidden', background: '#101a2b' }}>
           <div style={{ padding: 14, borderBottom: '1px solid #26364d', display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
