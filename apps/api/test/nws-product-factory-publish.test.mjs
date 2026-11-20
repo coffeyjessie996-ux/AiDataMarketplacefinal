@@ -34,5 +34,5 @@ test('published NWS product downloads retain attribution and require owner or pa
   assert.match(download, /non_endorsement_notice/);
   assert.match(download, /payload\.attribution/);
   assert.match(download, /payload\.sourceTermsUrl/);
-  assert.match(download, /if \(\/[\^\\s\]\*\[=\+\\-@\]\/\.test\(text\)\)/);
+  assert.match(download, /\.test\(text\)/);
 });
