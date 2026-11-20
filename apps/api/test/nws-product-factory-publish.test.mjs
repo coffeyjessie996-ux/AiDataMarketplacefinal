@@ -16,7 +16,7 @@ test('Product Factory publishing is limited to approved NWS point/grid forecast 
   assert.ok(validatorStart >= 0 && routerStart > validatorStart);
   assert.match(validator, /url\.hostname === 'api\.weather\.gov'/);
   assert.match(validator, /gridpoints/);
-  assert.match(validator, /sourceTermsUrl/);
+  assert.match(validator, /sourceTermsUrl === 'https:\\/\\/www\\.weather\\.gov\\/disclaimer'/);
   assert.match(validator, /forecastUpdatedAt/);
   assert.match(publish, /sourceNames\.length !== 1 \|\| sourceNames\[0\] !== 'nws_api_forecasts'/);
   assert.match(publish, /isCommercialReuseApproved\(source\)/);
