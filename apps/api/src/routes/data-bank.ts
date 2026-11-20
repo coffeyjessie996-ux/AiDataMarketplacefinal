@@ -271,6 +271,85 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
     }
   });
 
+  // Build a value-added planning brief from the signed-in owner's latest NWS forecast draft.
+  // This is derived decision-support content, not an official NWS product or a safety guarantee.
+  router.get('/weather-brief', async (req: AuthReq, res) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    try {
+      const dataset = await prisma.dataset.findFirst({
+        where: { sellerId: user.id, status: 'DRAFT', tags: { has: 'source:nws_api_forecasts' } },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, title: true, tags: true, createdAt: true },
+      });
+      if (!dataset) return res.status(404).json({ error: 'No private NWS forecast draft exists yet.' });
+      const recordIds = dataset.tags.filter((tag) => tag.startsWith('source-record-id:'))
+        .map((tag) => tag.slice('source-record-id:'.length)).filter(Boolean);
+      if (!recordIds.length) return res.status(404).json({ error: 'The forecast draft has no linked source records.' });
+      const records = await prisma.supplierResearchRecord.findMany({
+        where: { id: { in: recordIds }, source: 'nws_api_forecasts' },
+        orderBy: { retrievedAt: 'desc' },
+        select: { id: true, sourceRecordId: true, sourceUrl: true, payload: true, retrievedAt: true },
+      });
+      if (!records.length) return res.status(404).json({ error: 'No linked NWS forecast records are available.' });
+      const periods = records.map((record) => {
+        const payload = asObject(record.payload);
+        const windText = String(payload.windSpeed ?? '');
+        const windMatch = windText.match(/[0-9]+(?:\.[0-9]+)?/);
+        return {
+          id: record.id,
+          period: String(payload.title ?? 'Forecast period'),
+          startTime: String(payload.startTime ?? ''),
+          endTime: String(payload.endTime ?? ''),
+          temperature: typeof payload.temperature === 'number' ? payload.temperature : null,
+          temperatureUnit: String(payload.temperatureUnit ?? 'F'),
+          shortForecast: String(payload.description ?? ''),
+          windSpeed: windText,
+          windMph: windMatch ? Number(windMatch[0]) : null,
+          windDirection: String(payload.windDirection ?? ''),
+          precipitationChance: typeof payload.probabilityOfPrecipitation === 'number' ? payload.probabilityOfPrecipitation : null,
+          detailedForecast: String(payload.detailedForecast ?? ''),
+          retrievedAt: record.retrievedAt,
+          sourceUrl: record.sourceUrl,
+          forecastUpdatedAt: String(payload.forecastUpdatedAt ?? ''),
+        };
+      }).sort((a, b) => a.startTime.localeCompare(b.startTime));
+      const temperatures = periods.map((period) => period.temperature).filter((value): value is number => value !== null);
+      const precipitation = periods.map((period) => period.precipitationChance).filter((value): value is number => value !== null);
+      const winds = periods.map((period) => period.windMph).filter((value): value is number => value !== null);
+      const maxPrecipitation = precipitation.length ? Math.max(...precipitation) : null;
+      const maxWindMph = winds.length ? Math.max(...winds) : null;
+      const planningFlags = [
+        ...(maxPrecipitation !== null && maxPrecipitation >= 40 ? ['At least one forecast period has a 40% or higher precipitation probability; consider checking the timing before planning weather-sensitive outdoor work.'] : []),
+        ...(maxWindMph !== null && maxWindMph >= 20 ? ['At least one forecast period lists wind of 20 mph or more; review the detailed forecast and current conditions before outdoor operations.'] : []),
+      ];
+      return res.json({ brief: {
+        datasetId: dataset.id,
+        datasetTitle: dataset.title,
+        location: String(asObject(records[0].payload).location ?? 'Saved forecast location'),
+        generatedAt: new Date().toISOString(),
+        forecastUpdatedAt: periods.map((period) => period.forecastUpdatedAt).filter(Boolean).sort().at(-1) ?? null,
+        retrievedAt: records.reduce((latest, record) => record.retrievedAt > latest ? record.retrievedAt : latest, records[0].retrievedAt),
+        periodCount: periods.length,
+        summary: {
+          minTemperature: temperatures.length ? Math.min(...temperatures) : null,
+          maxTemperature: temperatures.length ? Math.max(...temperatures) : null,
+          maxPrecipitationChance: maxPrecipitation,
+          maxWindMph,
+        },
+        planningFlags,
+        periods,
+        source: 'National Weather Service API (api.weather.gov)',
+        sourceTermsUrl: 'https://www.weather.gov/disclaimer',
+        sourceUrl: periods[0]?.sourceUrl ?? null,
+        disclaimer: 'This is a third-party planning summary derived from NWS public-domain forecast data. It is not an official NWS product, does not imply NOAA/NWS endorsement, and is not a guarantee or safety determination. Forecasts may change; check current official alerts and conditions before making operational decisions.',
+      } });
+    } catch (error) {
+      console.error('NWS weather brief generation failed', error);
+      return res.status(500).json({ error: 'Unable to generate the weather planning brief.' });
+    }
+  });
+
   router.get('/products', async (req: AuthReq, res) => {
     const user = req.user;
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
