@@ -58,3 +58,26 @@ test('weather brief is owner-scoped and derives a sourced planning summary from 
   assert.match(page, /Print \/ save as PDF/);
   assert.match(page, /not cleared for redistribution/);
 });
+
+
+test('public weather pilot preview fetches only official NWS point/grid forecast data', () => {
+  const api = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const preview = api.split("app.get('/weather-pilot/preview'")[1]?.split("app.post('/auth/register'")[0] ?? '';
+  assert.match(preview, /api\\.weather\\.gov/);
+  assert.match(preview, /validatedForecastUrl\\.hostname !== 'api\\.weather\\.gov'/);
+  assert.match(preview, /validatedForecastUrl\\.pathname\\.includes\\('\/gridpoints\/'\)/);
+  assert.match(preview, /Cache-Control/);
+  assert.doesNotMatch(preview, /prisma\\./);
+  assert.match(api, /'weather-planning'/);
+});
+
+test('public weather pilot clearly attributes the live sample and separates consent from unrelated marketing', () => {
+  const pilot = readFileSync(new URL('../../web/app/weather-pilot/weather-pilot.tsx', import.meta.url), 'utf8');
+  const page = readFileSync(new URL('../../web/app/weather-pilot/page.tsx', import.meta.url), 'utf8');
+  assert.match(pilot, /NWS point forecast/);
+  assert.match(pilot, /No NOAA\\/NWS endorsement/);
+  assert.match(pilot, /not an official NWS product/);
+  assert.match(pilot, /not consent to unrelated marketing/);
+  assert.match(pilot, /budgetRange/);
+  assert.match(page, /canonical: '\/weather-pilot'/);
+});
