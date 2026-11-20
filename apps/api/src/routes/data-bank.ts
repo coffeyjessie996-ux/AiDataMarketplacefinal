@@ -2,7 +2,7 @@ import express from 'express';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { User } from '../types';
 import { z } from 'zod';
-import { isCommercialReuseApproved } from '../services/source-rights';
+import { isApprovedNwsForecastRecord, isCommercialReuseApproved } from '../services/source-rights';
 
 type AuthReq = express.Request & { user?: User };
 type JsonObject = Record<string, unknown>;
@@ -576,12 +576,15 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
       if (!recordIds.length || new Set(recordIds).size !== recordIds.length) {
         return res.status(409).json({ error: 'The draft must contain a non-empty, duplicate-free source record set.' });
       }
+      if (sourceNames.length !== 1 || sourceNames[0] !== 'nws_api_forecasts') {
+        return res.status(409).json({ error: 'The publish workflow currently supports only reviewed NWS point/grid forecast datasets.' });
+      }
       const records = await prisma.supplierResearchRecord.findMany({
-        where: { id: { in: recordIds }, source: 'usaspending.gov' },
-        select: { id: true, sourceUrl: true },
+        where: { id: { in: recordIds }, source: 'nws_api_forecasts' },
+        select: { id: true, sourceUrl: true, payload: true },
       });
-      if (records.length !== recordIds.length || records.some((record) => !record.sourceUrl.startsWith('https://'))) {
-        return res.status(409).json({ error: 'Every attached record must be available from its original HTTPS USAspending source before publication.' });
+      if (records.length !== recordIds.length || records.some((record) => !isApprovedNwsForecastRecord(record))) {
+        return res.status(409).json({ error: 'Every attached record must be a complete NWS point/grid forecast period from api.weather.gov with the approved source terms.' });
       }
 
       const publishedAt = new Date();
@@ -700,37 +703,50 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
         .filter(Boolean);
       if (recordIds.length === 0) return res.status(409).json({ error: 'This dataset has no attached source records to deliver.' });
 
+      const sourceNames = product.tags
+        .filter((tag) => tag.startsWith('source:'))
+        .map((tag) => tag.slice('source:'.length));
+      if (sourceNames.length !== 1 || sourceNames[0] !== 'nws_api_forecasts' ||
+          sourceNames.some((source) => !isCommercialReuseApproved(source))) {
+        return res.status(409).json({ error: 'Automated delivery supports only source-reviewed NWS point/grid forecast datasets.' });
+      }
+
       const records = await prisma.supplierResearchRecord.findMany({
-        where: { id: { in: recordIds } },
-        orderBy: [{ retrievedAt: 'desc' }, { createdAt: 'desc' }],
+        where: { id: { in: recordIds }, source: 'nws_api_forecasts' },
+        orderBy: [{ retrievedAt: 'desc' }, { sourceRecordId: 'asc' }],
         select: {
-          source: true, sourceRecordId: true, supplierName: true,
-          awardAmount: true, sourceUrl: true, payload: true, retrievedAt: true,
+          source: true, sourceRecordId: true, sourceUrl: true, payload: true, retrievedAt: true,
         },
       });
-      if (records.length === 0) return res.status(409).json({ error: 'The source records for this dataset are no longer available.' });
+      if (records.length !== recordIds.length || records.some((record) => !isApprovedNwsForecastRecord(record))) {
+        return res.status(409).json({ error: 'The complete approved NWS forecast record set is not available for delivery.' });
+      }
 
-      const payloadFields = [
-        'title', 'description', 'awardingAgency', 'awardId', 'noticeId',
-        'naics', 'supplierUei', 'startDate', 'endDate', 'postedDate', 'responseDeadline',
-      ];
       const headers = [
-        'source', 'source_record_id', 'supplier_name', 'award_amount_usd',
-        'source_url', 'retrieved_at', ...payloadFields,
+        'location', 'latitude', 'longitude', 'forecast_period', 'start_time', 'end_time',
+        'is_daytime', 'temperature', 'temperature_unit', 'probability_of_precipitation',
+        'wind_speed', 'wind_direction', 'description', 'detailed_forecast', 'attribution',
+        'source_terms_url', 'source', 'source_record_id', 'source_url', 'forecast_updated_at',
+        'retrieved_at', 'non_endorsement_notice',
       ];
       const csvCell = (value: unknown) => {
-        let text = value === null || value === undefined ? '' : String(value);
-        // Prevent spreadsheet formula execution when buyers open exported CSV files.
-        if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
+        let text = value === null || value === undefined
+          ? ''
+          : typeof value === 'string' ? value : JSON.stringify(value);
+        if (/^[\s]*[=+\-@]/.test(text)) text = "'" + text;
         return '"' + text.replace(/"/g, '""') + '"';
       };
       const rows = records.map((record) => {
         const payload = asObject(record.payload);
         return [
-          record.source, record.sourceRecordId, record.supplierName,
-          record.awardAmount?.toString() ?? '', record.sourceUrl,
+          payload.location, payload.latitude, payload.longitude, payload.title, payload.startTime, payload.endTime,
+          payload.isDaytime, payload.temperature, payload.temperatureUnit, payload.probabilityOfPrecipitation,
+          payload.windSpeed, payload.windDirection, payload.description, payload.detailedForecast,
+          payload.attribution ?? 'Source: U.S. National Weather Service (NWS).',
+          payload.sourceTermsUrl ?? 'https://www.weather.gov/disclaimer',
+          record.source, record.sourceRecordId, record.sourceUrl, payload.forecastUpdatedAt,
           record.retrievedAt.toISOString(),
-          ...payloadFields.map((field) => payload[field]),
+          'Not an official NWS product. NOAA/NWS does not endorse this dataset.',
         ].map(csvCell).join(',');
       });
       const csv = [headers.map(csvCell).join(','), ...rows].join('\r\n');
@@ -738,7 +754,7 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${safeName}.csv"`);
       res.setHeader('Cache-Control', 'private, no-store');
-      return res.status(200).send(csv);
+      return res.status(200).send('\uFEFF' + csv);
     } catch (error) {
       console.error('Dataset download failed', error);
       return res.status(500).json({ error: 'Unable to prepare the dataset download.' });

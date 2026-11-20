@@ -21,7 +21,7 @@ import { createOperationsRouter } from './routes/operations';
 import { createAuctionsRouter } from './routes/auctions';
 import { finishAgentTask, startAgentTask } from './services/agent-activity';
 import { upsertResearchRecordPreservingAnalysis } from './services/research-records';
-import { isCommercialReuseApproved } from './services/source-rights';
+import { isApprovedNwsForecastRecord, isCommercialReuseApproved } from './services/source-rights';
 
 dotenv.config();
 
@@ -1127,11 +1127,13 @@ app.post('/orders', requireAuth, async (req, res) => {
     if (sourceNames.length !== 1 || sourceNames[0] !== 'nws_api_forecasts') {
       return res.status(409).json({ error: 'Automated checkout currently supports only reviewed NWS point/grid forecast datasets.' });
     }
-    const availableRecordCount = await prisma.supplierResearchRecord.count({
+    const availableRecords = await prisma.supplierResearchRecord.findMany({
       where: { id: { in: includedRecordIds }, source: 'nws_api_forecasts' },
+      select: { id: true, sourceUrl: true, payload: true },
     });
-    if (availableRecordCount !== includedRecordIds.length) {
-      return res.status(409).json({ error: 'The complete NWS forecast record set is not available for delivery.' });
+    if (availableRecords.length !== includedRecordIds.length ||
+        availableRecords.some((record) => !isApprovedNwsForecastRecord(record))) {
+      return res.status(409).json({ error: 'The complete approved NWS forecast record set is not available for delivery.' });
     }
     if (dataset.sellerId === user.id) return res.status(400).json({ error: 'You cannot purchase your own dataset.' });
 
@@ -1326,7 +1328,7 @@ app.get('/orders/:id/download', requireAuth, async (req, res) => {
       where: { id: { in: recordIds }, source: 'nws_api_forecasts' },
       orderBy: [{ retrievedAt: 'desc' }, { sourceRecordId: 'asc' }],
     });
-    if (records.length !== recordIds.length) {
+    if (records.length !== recordIds.length || records.some((record) => !isApprovedNwsForecastRecord(record))) {
       return res.status(409).json({ error: 'The complete NWS forecast record set is not available for delivery. Contact the seller for assistance.' });
     }
 
