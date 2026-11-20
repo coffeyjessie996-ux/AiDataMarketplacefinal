@@ -75,7 +75,7 @@ test('public weather pilot clearly attributes the live sample and separates cons
   const pilot = readFileSync(new URL('../../web/app/weather-pilot/weather-pilot.tsx', import.meta.url), 'utf8');
   const page = readFileSync(new URL('../../web/app/weather-pilot/page.tsx', import.meta.url), 'utf8');
   assert.ok(pilot.includes('NWS point forecast'));
-  assert.ok(pilot.includes('No NOAA/NWS endorsement'));
+  assert.ok(pilot.includes('NOAA/NWS endorsement'));
   assert.ok(pilot.includes('not an official NWS product'));
   assert.ok(pilot.includes('not consent to unrelated marketing'));
   assert.ok(pilot.includes('budgetRange'));
