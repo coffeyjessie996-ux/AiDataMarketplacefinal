@@ -235,7 +235,7 @@ export default function DataBankPage() {
           </button>
           {weatherMessage && <p role="status" style={{ color: '#86efac', fontSize: 13, marginTop: 10 }}>{weatherMessage}</p>}
           {weatherError && <p role="alert" style={{ color: '#fecaca', fontSize: 13, marginTop: 10 }}>{weatherError}</p>}
-          <p style={{ color: '#8291a7', fontSize: 11, lineHeight: 1.5, marginTop: 10 }}>Source: National Weather Service API. NWS data is public domain unless noted otherwise; no NOAA/NWS endorsement. Third-party station observations are excluded. Forecasts can change and are not guaranteed.</p>
+          <p style={{ color: '#8291a7', fontSize: 11, lineHeight: 1.5, marginTop: 10 }}>Source: National Weather Service API. NWS data is public domain unless noted otherwise. No NOAA/NWS endorsement is claimed. Third-party station observations are excluded. Forecasts can change and are not guaranteed.</p>
         </section>
 
         {weatherBrief && <section id="weather-operations-brief" style={{ background: '#101a2b', border: '1px solid #31506f', borderRadius: 12, padding: 18, marginBottom: 18 }}>
