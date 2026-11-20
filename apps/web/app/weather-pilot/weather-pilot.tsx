@@ -194,7 +194,7 @@ export default function WeatherPilot() {
       </section>
 
       <footer style={{ marginTop: 28, paddingTop: 18, borderTop: '1px solid rgba(148,163,184,.15)', color: '#94a3b8', fontSize: 12, lineHeight: 1.7 }}>
-        <p><strong style={{ color: '#cbd5e1' }}>Source and use notice:</strong> NWS API information is public data subject to the source’s terms and exclusions. We identify the source and do not claim NOAA/NWS endorsement. The pilot adds planning context; it is not an official forecast, professional safety advice, or a guarantee of jobsite conditions.</p>
+        <p><strong style={{ color: '#cbd5e1' }}>Source and use notice:</strong> NWS API information is public data subject to the source’s terms and exclusions. We identify the source and do not claim NOAA/NWS endorsement. The pilot adds planning context; it is not an official NWS product or forecast, professional safety advice, or a guarantee of jobsite conditions.</p>
         <p>Forecasts can change. Consult current official alerts, detailed forecasts, employer procedures, and qualified safety professionals before making operational decisions. No customer data or private forecast draft is shown on this public page.</p>
         <a href="/" style={{ color: '#7dd3fc' }}>Return to AI Data Marketplace</a>
       </footer>
