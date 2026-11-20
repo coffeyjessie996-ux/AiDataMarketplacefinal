@@ -48,7 +48,7 @@ test('checkout requires attached source records and seller rights-review evidenc
   assert.match(checkout, /new Set\(includedRecordIds\)/);
   assert.match(checkout, /license-review-status:seller_reviewed/);
   assert.match(checkout, /license-review-evidence:/);
-  assert.match(checkout, /source: 'usaspending.gov'/);
+  assert.match(checkout, /source: 'nws_api_forecasts'/);
 });
 
 test('checkout session is tied to the order and protected by an idempotency key', () => {
@@ -93,4 +93,15 @@ test('download requires this buyer to have a paid order and an eligible publishe
   assert.match(download, /factory:v1/);
   assert.match(download, /license-review-status:seller_reviewed/);
   assert.match(download, /license-review-evidence:/);
+});
+
+
+test('checkout and delivery are limited to the specifically approved NWS forecast source', () => {
+  assert.match(checkout, /sourceNames\.length !== 1 \|\| sourceNames\[0\] !== 'nws_api_forecasts'/);
+  assert.match(checkout, /isCommercialReuseApproved\(source\)/);
+  assert.match(checkout, /source: 'nws_api_forecasts'/);
+  assert.match(download, /sourceNames\.length !== 1 \|\| sourceNames\[0\] !== 'nws_api_forecasts'/);
+  assert.match(download, /source: 'nws_api_forecasts'/);
+  assert.match(download, /sourceTermsUrl/);
+  assert.match(download, /nonEndorsementNotice/);
 });
