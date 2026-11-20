@@ -259,8 +259,11 @@ export default function ProductFactoryPage() {
             Assemble real records already saved in your Data Bank into a private product draft. Source links and collection dates are retained, and a transparent completeness score is calculated from the records.
           </p>
           <p style={{ color: '#fbbf24', fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>
-            Grants.gov records can be used for research and private drafts. The current publish-and-delivery workflow is limited to USAspending records while Grants.gov redistribution terms are reviewed. See the <a href="https://www.grants.gov/api/terms-conditions" target="_blank" rel="noreferrer" style={{ color: '#7dd3fc' }}>official Grants.gov API terms</a> before making a resale decision.
-          </p><p style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 1.5, marginTop: 14 }}>This product uses the Grants.gov API but is not endorsed or certified by the U.S. Department of Health and Human Services.</p>
+            The current automated publish-and-delivery path supports only NWS-issued point/grid forecasts from api.weather.gov, the one source currently approved for commercial reuse in this app. Each listing still requires seller review, source evidence, and a separate rights attestation. USAspending and Grants.gov records remain internal research only; SAM.gov is limited to its authorized public API and internal research; generic website scraping is blocked. See the <a href="https://www.weather.gov/documentation/services-web-api" target="_blank" rel="noreferrer" style={{ color: '#7dd3fc' }}>NWS API terms</a> and <a href="https://www.weather.gov/disclaimer" target="_blank" rel="noreferrer" style={{ color: '#7dd3fc' }}>NWS disclaimer</a>.
+          </p>
+          <p style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 1.5, marginTop: 14 }}>
+            NWS forecast information is public data, but this product is not an official NWS product or forecast, and NOAA/NWS does not endorse it. Preserve source attribution and forecast issue/valid times; do not include third-party station observations or imagery.
+          </p>
         </header>
 
         <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16, marginBottom: 18 }}>
