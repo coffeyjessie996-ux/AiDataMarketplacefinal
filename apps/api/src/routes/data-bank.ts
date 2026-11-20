@@ -583,7 +583,7 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
         where: { id: { in: recordIds }, source: 'nws_api_forecasts' },
         select: { id: true, sourceUrl: true, payload: true },
       });
-      if (records.length !== recordIds.length || records.some((record) => !isNwsForecastRecord(record))) {
+      if (records.length !== recordIds.length || records.some((record) => !isApprovedNwsForecastRecord(record))) {
         return res.status(409).json({ error: 'Every attached record must be a complete NWS point/grid forecast period from api.weather.gov with the approved source terms.' });
       }
 
@@ -718,7 +718,7 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
           source: true, sourceRecordId: true, sourceUrl: true, payload: true, retrievedAt: true,
         },
       });
-      if (records.length !== recordIds.length || records.some((record) => !isNwsForecastRecord(record))) {
+      if (records.length !== recordIds.length || records.some((record) => !isApprovedNwsForecastRecord(record))) {
         return res.status(409).json({ error: 'The complete approved NWS forecast record set is not available for delivery.' });
       }
 
@@ -743,7 +743,7 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
           payload.isDaytime, payload.temperature, payload.temperatureUnit, payload.probabilityOfPrecipitation,
           payload.windSpeed, payload.windDirection, payload.description, payload.detailedForecast,
           payload.attribution ?? 'Source: U.S. National Weather Service (NWS).',
-          payload.sourceTermsUrl ?? 'https://www.weather.gov/documentation/services-web-api',
+          payload.sourceTermsUrl ?? 'https://www.weather.gov/disclaimer',
           record.source, record.sourceRecordId, record.sourceUrl, payload.forecastUpdatedAt,
           record.retrievedAt.toISOString(),
           'Not an official NWS product. NOAA/NWS does not endorse this dataset.',
