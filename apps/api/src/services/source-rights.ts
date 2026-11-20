@@ -64,3 +64,29 @@ export const SOURCE_RIGHTS_POLICY: Readonly<Record<string, SourceRightsPolicy>> 
 export function isCommercialReuseApproved(source: string): boolean {
   return SOURCE_RIGHTS_POLICY[source]?.status === 'commercial_reuse_approved';
 }
+
+
+/**
+ * Validate the exact NWS forecast record shape approved for commercial reuse.
+ * This intentionally excludes station observations, imagery, and third-party content.
+ */
+export function isApprovedNwsForecastRecord(record: { sourceUrl: string; payload: unknown }): boolean {
+  try {
+    const url = new URL(record.sourceUrl);
+    const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+      ? record.payload as Record<string, unknown>
+      : {};
+    const hasValue = (value: unknown) => value !== null && value !== undefined && String(value).trim().length > 0;
+    return url.protocol === 'https:' &&
+      url.hostname === 'api.weather.gov' &&
+      /^\/gridpoints\/[A-Z0-9]+\/\d+,\d+\/forecast$/i.test(url.pathname) &&
+      payload.sourceTermsUrl === 'https://www.weather.gov/disclaimer' &&
+      hasValue(payload.location) &&
+      hasValue(payload.title) &&
+      hasValue(payload.startTime) &&
+      hasValue(payload.endTime) &&
+      hasValue(payload.forecastUpdatedAt);
+  } catch {
+    return false;
+  }
+}
