@@ -295,7 +295,7 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
       const periods = records.map((record) => {
         const payload = asObject(record.payload);
         const windText = String(payload.windSpeed ?? '');
-        const windMatch = windText.match(/[0-9]+(?:\\.[0-9]+)?/);
+        const windMatch = windText.match(/[0-9]+(?:\.[0-9]+)?/);
         return {
           id: record.id,
           period: String(payload.title ?? 'Forecast period'),
