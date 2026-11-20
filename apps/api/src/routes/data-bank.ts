@@ -751,7 +751,7 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
         let text = value === null || value === undefined
           ? ''
           : typeof value === 'string' ? value : JSON.stringify(value);
-        if (/^[\\s]*[=+\\-@]/.test(text)) text = "'" + text;
+        if (/^[\s]*[=+\-@]/.test(text)) text = "'" + text;
         return '"' + text.replace(/"/g, '""') + '"';
       };
       const rows = records.map((record) => {
@@ -767,12 +767,12 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
           'Not an official NWS product. NOAA/NWS does not endorse this dataset.',
         ].map(csvCell).join(',');
       });
-      const csv = [headers.map(csvCell).join(','), ...rows].join('\\r\\n');
+      const csv = [headers.map(csvCell).join(','), ...rows].join('\r\n');
       const safeName = product.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'dataset';
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${safeName}.csv"`);
       res.setHeader('Cache-Control', 'private, no-store');
-      return res.status(200).send('\\uFEFF' + csv);
+      return res.status(200).send('\uFEFF' + csv);
     } catch (error) {
       console.error('Dataset download failed', error);
       return res.status(500).json({ error: 'Unable to prepare the dataset download.' });
