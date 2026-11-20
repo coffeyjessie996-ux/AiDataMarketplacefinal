@@ -45,3 +45,16 @@ test('Data Bank exposes a manual collector and the non-endorsement disclosure', 
   assert.match(page, /No NOAA\/NWS endorsement/);
   assert.match(page, /private, restricted, \$0 draft/);
 });
+
+
+test('weather brief is owner-scoped and derives a sourced planning summary from NWS records', () => {
+  const collector = route.split("router.get('/weather-brief'")[1]?.split("router.get('/products'")[0] ?? '';
+  assert.match(collector, /sellerId: user\.id/);
+  assert.match(collector, /source: 'nws_api_forecasts'/);
+  assert.match(collector, /maxPrecipitationChance/);
+  assert.match(collector, /maxWindMph/);
+  assert.match(collector, /does not imply NOAA\/NWS endorsement/);
+  assert.match(page, /Weather operations planning brief/);
+  assert.match(page, /Print \/ save as PDF/);
+  assert.match(page, /not cleared for redistribution/);
+});
