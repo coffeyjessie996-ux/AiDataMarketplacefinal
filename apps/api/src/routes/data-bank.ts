@@ -2,7 +2,7 @@ import express from 'express';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { User } from '../types';
 import { z } from 'zod';
-import { isCommercialReuseApproved } from '../services/source-rights';
+import { isApprovedNwsForecastRecord, isCommercialReuseApproved } from '../services/source-rights';
 
 type AuthReq = express.Request & { user?: User };
 type JsonObject = Record<string, unknown>;
@@ -13,24 +13,6 @@ function asObject(value: unknown): JsonObject {
 
 function hasValue(value: unknown): boolean {
   return value !== null && value !== undefined && String(value).trim().length > 0;
-}
-
-function isNwsForecastRecord(record: { sourceUrl: string; payload: unknown }): boolean {
-  try {
-    const url = new URL(record.sourceUrl);
-    const payload = asObject(record.payload);
-    return url.protocol === 'https:' &&
-      url.hostname === 'api.weather.gov' &&
-      /^\/gridpoints\/[A-Z0-9]+\/\d+,\d+\/forecast$/i.test(url.pathname) &&
-      payload.sourceTermsUrl === 'https://www.weather.gov/disclaimer' &&
-      hasValue(payload.location) &&
-      hasValue(payload.title) &&
-      hasValue(payload.startTime) &&
-      hasValue(payload.endTime) &&
-      hasValue(payload.forecastUpdatedAt);
-  } catch {
-    return false;
-  }
 }
 
 export function createDataBankRouter(prisma: PrismaClient, auth: express.RequestHandler) {
