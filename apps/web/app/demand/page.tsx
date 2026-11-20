@@ -92,8 +92,8 @@ export default function BuyerDemandPage() {
         <section style={{ marginTop: 22, background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 18 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <div>
-              <h2 style={{ fontSize: 20, margin: '0 0 6px' }}>GovCon buyer inquiry inbox</h2>
-              <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>Requests submitted through the public business-buyer page. These are inquiries, not confirmed buyers or sales.</p>
+              <h2 style={{ fontSize: 20, margin: '0 0 6px' }}>Buyer inquiry inbox</h2>
+              <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>Requests submitted through the public business-buyer and pilot pages. These are inquiries, not confirmed buyers or sales.</p>
             </div>
             <strong style={{ color: '#93c5fd' }}>{inquiries.filter(item => item.status === 'NEW').length} new</strong>
           </div>
