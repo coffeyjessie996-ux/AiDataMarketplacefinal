@@ -22,7 +22,7 @@ function isNwsForecastRecord(record: { sourceUrl: string; payload: unknown }): b
     return url.protocol === 'https:' &&
       url.hostname === 'api.weather.gov' &&
       /^\/gridpoints\/[A-Z0-9]+\/\d+,\d+\/forecast$/i.test(url.pathname) &&
-      payload.sourceTermsUrl === 'https://www.weather.gov/documentation/services-web-api' &&
+      payload.sourceTermsUrl === 'https://www.weather.gov/disclaimer' &&
       hasValue(payload.location) &&
       hasValue(payload.title) &&
       hasValue(payload.startTime) &&
