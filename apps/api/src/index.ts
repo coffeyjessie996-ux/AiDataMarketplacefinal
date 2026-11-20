@@ -276,6 +276,88 @@ app.get('/health', (_req, res) => {
   });
 });
 
+// Public, read-only weather pilot preview. It fetches only NWS-issued point/grid forecasts;
+// it never reads private marketplace drafts or exposes saved customer data.
+app.get('/weather-pilot/preview', async (_req, res) => {
+  const location = 'Denver, NC';
+  const latitude = 35.5315;
+  const longitude = -81.0287;
+  const headers = {
+    accept: 'application/geo+json',
+    'user-agent': 'AI-Data-Marketplace/1.0 (+https://aidatamarketplacefinal.vercel.app)',
+  };
+
+  try {
+    const pointResponse = await fetch(`https://api.weather.gov/points/${latitude},${longitude}`, {
+      headers,
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!pointResponse.ok) {
+      return res.status(502).json({ error: 'The National Weather Service location service is temporarily unavailable.' });
+    }
+    const pointPayload = await pointResponse.json() as {
+      properties?: { forecast?: string };
+    };
+    const forecastUrl = pointPayload.properties?.forecast;
+    if (!forecastUrl) return res.status(502).json({ error: 'No official point forecast is available for this preview location.' });
+
+    const validatedForecastUrl = new URL(forecastUrl);
+    if (
+      validatedForecastUrl.protocol !== 'https:' ||
+      validatedForecastUrl.hostname !== 'api.weather.gov' ||
+      !validatedForecastUrl.pathname.includes('/gridpoints/')
+    ) {
+      return res.status(502).json({ error: 'The forecast service returned an unexpected source URL.' });
+    }
+
+    const forecastResponse = await fetch(validatedForecastUrl.toString(), {
+      headers,
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!forecastResponse.ok) {
+      return res.status(502).json({ error: 'The National Weather Service forecast is temporarily unavailable.' });
+    }
+    const forecastPayload = await forecastResponse.json() as {
+      properties?: {
+        updateTime?: string;
+        periods?: Array<Record<string, unknown>>;
+      };
+    };
+    const periods = (forecastPayload.properties?.periods ?? []).slice(0, 8).map((period) => {
+      const precipitation = period.probabilityOfPrecipitation && typeof period.probabilityOfPrecipitation === 'object'
+        ? (period.probabilityOfPrecipitation as Record<string, unknown>).value ?? null
+        : null;
+      return {
+        name: String(period.name ?? 'Forecast period').slice(0, 80),
+        startTime: String(period.startTime ?? ''),
+        temperature: typeof period.temperature === 'number' ? period.temperature : null,
+        temperatureUnit: String(period.temperatureUnit ?? 'F'),
+        shortForecast: String(period.shortForecast ?? 'Forecast details unavailable').slice(0, 180),
+        windSpeed: String(period.windSpeed ?? ''),
+        windDirection: String(period.windDirection ?? ''),
+        precipitationChance: typeof precipitation === 'number' ? precipitation : null,
+      };
+    }).filter((period) => period.startTime && !Number.isNaN(Date.parse(period.startTime)));
+
+    if (!periods.length) return res.status(502).json({ error: 'The forecast service returned no usable forecast periods.' });
+
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=300');
+    return res.json({
+      location,
+      source: 'National Weather Service API (api.weather.gov)',
+      sourceUrl: validatedForecastUrl.toString(),
+      sourceTermsUrl: 'https://www.weather.gov/disclaimer',
+      forecastUpdatedAt: forecastPayload.properties?.updateTime ?? null,
+      retrievedAt: new Date().toISOString(),
+      periods,
+      disclaimer: 'This is a planning preview derived from NWS forecast data, not an official NWS product or a safety determination. Forecasts can change. Check current official alerts and site conditions before making operational decisions. No NOAA/NWS endorsement is implied.',
+    });
+  } catch (error) {
+    console.error('Public weather pilot preview failed', error);
+    return res.status(502).json({ error: 'Unable to load the weather preview right now. Please try again later.' });
+  }
+});
+
 app.post('/auth/register', async (req, res) => {
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -438,7 +520,8 @@ const buyerInquirySchema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.string().trim().email().max(254),
   company: z.string().trim().min(2).max(160),
-  interest: z.enum(['supplier-intelligence', 'engineering-awards', 'agency-trends', 'custom-research']),
+  interest: z.enum(['supplier-intelligence', 'engineering-awards', 'agency-trends', 'custom-research', 'weather-planning']),
+  budgetRange: z.enum(['under-25', '25-49', '50-99', '100-249', '250-plus', 'not-sure']).optional().default('not-sure'),
   message: z.string().trim().max(1500).optional().default(''),
   consent: z.literal(true),
   website: z.string().max(0).optional().default(''),
@@ -459,13 +542,13 @@ app.post('/buyer-inquiries', async (req, res) => {
     await prisma.buyerDemandEvent.create({
       data: {
         query: 'buyer_inquiry',
-        category: 'government-contracting',
+        category: parsed.data.interest === 'weather-planning' ? 'weather-planning' : 'government-contracting',
         resultCount: 0,
         buyerName: parsed.data.name,
         buyerEmail: email,
         companyName: parsed.data.company,
         interest: parsed.data.interest,
-        message: parsed.data.message || null,
+        message: [parsed.data.message, parsed.data.interest === 'weather-planning' ? `Monthly budget interest: ${parsed.data.budgetRange}` : ''].filter(Boolean).join('\n\n') || null,
         status: 'NEW',
         contactConsentAt: new Date(),
       },

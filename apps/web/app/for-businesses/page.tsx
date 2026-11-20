@@ -66,6 +66,7 @@ export default function ForBusinessesPage() {
           <a href="/#catalog" style={{ color: '#cbd5e1', textDecoration: 'none' }}>Browse data</a>
           <a href="/suppliers" style={{ color: '#cbd5e1', textDecoration: 'none' }}>Supplier research</a>
           <a href="/auctions" style={{ color: '#cbd5e1', textDecoration: 'none' }}>Auctions</a>
+          <a href="/weather-pilot" style={{ color: '#67e8f9', textDecoration: 'none' }}>Weather planning pilot</a>
           <a href="/login" style={{ color: '#cbd5e1', textDecoration: 'none' }}>Sign in</a>
         </div>
       </nav>
