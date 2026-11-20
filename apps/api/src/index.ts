@@ -1113,12 +1113,6 @@ app.post('/orders', requireAuth, async (req, res) => {
         !dataset.tags.some((tag) => tag.startsWith('license-review-evidence:'))) {
       return res.status(409).json({ error: 'Seller source-rights review and evidence are required before checkout.' });
     }
-    const availableRecordCount = await prisma.supplierResearchRecord.count({
-      where: { id: { in: includedRecordIds }, source: 'usaspending.gov' },
-    });
-    if (availableRecordCount !== includedRecordIds.length) {
-      return res.status(409).json({ error: 'This delivery currently supports only complete USAspending record sets.' });
-    }
     const sourceNames = dataset.tags
       .filter((tag) => tag.startsWith('source:'))
       .map((tag) => tag.slice('source:'.length));
@@ -1126,6 +1120,18 @@ app.post('/orders', requireAuth, async (req, res) => {
       return res.status(409).json({
         error: 'Checkout is blocked because commercial redistribution rights have not been approved for every source in this dataset.',
       });
+    }
+    // Keep the first automated delivery format narrow: only the specifically reviewed
+    // NWS-issued point/grid forecast source is supported. Do not route other public data
+    // sources through this CSV exporter.
+    if (sourceNames.length !== 1 || sourceNames[0] !== 'nws_api_forecasts') {
+      return res.status(409).json({ error: 'Automated checkout currently supports only reviewed NWS point/grid forecast datasets.' });
+    }
+    const availableRecordCount = await prisma.supplierResearchRecord.count({
+      where: { id: { in: includedRecordIds }, source: 'nws_api_forecasts' },
+    });
+    if (availableRecordCount !== includedRecordIds.length) {
+      return res.status(409).json({ error: 'The complete NWS forecast record set is not available for delivery.' });
     }
     if (dataset.sellerId === user.id) return res.status(400).json({ error: 'You cannot purchase your own dataset.' });
 
@@ -1308,39 +1314,47 @@ app.get('/orders/:id/download', requireAuth, async (req, res) => {
       return res.status(409).json({ error: 'The purchased listing has no valid attached source records.' });
     }
 
+    const sourceNames = order.dataset.tags
+      .filter((tag) => tag.startsWith('source:'))
+      .map((tag) => tag.slice('source:'.length));
+    if (sourceNames.length !== 1 || sourceNames[0] !== 'nws_api_forecasts' ||
+        sourceNames.some((source) => !isCommercialReuseApproved(source))) {
+      return res.status(409).json({ error: 'Automated delivery supports only source-reviewed NWS point/grid forecast datasets.' });
+    }
+
     const records = await prisma.supplierResearchRecord.findMany({
-      where: { id: { in: recordIds }, source: 'usaspending.gov' },
-      orderBy: [{ retrievedAt: 'desc' }, { supplierName: 'asc' }],
+      where: { id: { in: recordIds }, source: 'nws_api_forecasts' },
+      orderBy: [{ retrievedAt: 'desc' }, { sourceRecordId: 'asc' }],
     });
     if (records.length !== recordIds.length) {
-      return res.status(409).json({ error: 'The complete source record set is not available for delivery. Contact the seller for assistance.' });
+      return res.status(409).json({ error: 'The complete NWS forecast record set is not available for delivery. Contact the seller for assistance.' });
     }
 
     const csvCell = (value: unknown) => {
       let text = value === null || value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value);
-      if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
+      if (/^[\s]*[=+\-@]/.test(text)) text = "'" + text;
       return `"${text.replace(/"/g, '""')}"`;
     };
-    const headers = ['supplierName', 'awardAmount', 'awardId', 'awardingAgency', 'description', 'startDate', 'endDate', 'performanceState', 'naics', 'supplierUei', 'source', 'sourceRecordId', 'sourceUrl', 'retrievedAt'];
+    const headers = [
+      'location', 'latitude', 'longitude', 'forecastPeriod', 'startTime', 'endTime',
+      'isDaytime', 'temperature', 'temperatureUnit', 'probabilityOfPrecipitation',
+      'windSpeed', 'windDirection', 'description', 'detailedForecast', 'attribution',
+      'sourceTermsUrl', 'source', 'sourceRecordId', 'sourceUrl', 'forecastUpdatedAt', 'retrievedAt',
+      'nonEndorsementNotice',
+    ];
     const rows = records.map((record) => {
       const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
         ? record.payload as Record<string, unknown>
         : {};
       const values = [
-        record.supplierName,
-        record.awardAmount?.toString() ?? payload.awardAmount,
-        payload.awardId ?? payload.generated_internal_id ?? record.sourceRecordId,
-        payload.awardingAgency,
-        payload.description,
-        payload.startDate,
-        payload.endDate,
-        payload.performanceState,
-        payload.naics,
-        payload.supplierUei,
-        record.source,
-        record.sourceRecordId,
-        record.sourceUrl,
+        payload.location, payload.latitude, payload.longitude, payload.title, payload.startTime, payload.endTime,
+        payload.isDaytime, payload.temperature, payload.temperatureUnit, payload.probabilityOfPrecipitation,
+        payload.windSpeed, payload.windDirection, payload.description, payload.detailedForecast,
+        payload.attribution ?? 'Source: U.S. National Weather Service (NWS).',
+        payload.sourceTermsUrl ?? 'https://www.weather.gov/disclaimer',
+        record.source, record.sourceRecordId, record.sourceUrl, payload.forecastUpdatedAt,
         record.retrievedAt.toISOString(),
+        'Not an official NWS product. NOAA/NWS does not endorse this dataset.',
       ];
       return values.map(csvCell).join(',');
     });
