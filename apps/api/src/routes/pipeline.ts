@@ -1,7 +1,7 @@
 import express from 'express';
 import Stripe from 'stripe';
 import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
 
@@ -420,11 +420,16 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       });
       if (previous) {
         try {
-          const previousData = JSON.parse(previous.description) as { sessionId?: string; amountCents?: number };
-          if (previousData.sessionId && previousData.amountCents === amountCents) {
+          const previousData = JSON.parse(previous.description) as { sessionId?: string; amountCents?: number; proposalDescription?: string };
+          if (previousData.sessionId) {
             const existing = await stripe.checkout.sessions.retrieve(previousData.sessionId);
-            if (existing.status === 'open' && existing.url) {
+            if (existing.status === 'open' && existing.url &&
+                previousData.amountCents === amountCents &&
+                previousData.proposalDescription === parsed.data.proposalDescription) {
               return res.json({ checkoutUrl: existing.url, reused: true, amountCents, currency: 'USD' });
+            }
+            if (existing.status === 'open') {
+              await stripe.checkout.sessions.expire(previousData.sessionId);
             }
           }
         } catch { /* Expired or unavailable session: create a fresh idempotent checkout. */ }
@@ -456,7 +461,7 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
         },
         success_url: `${baseUrl}/service-checkout/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${baseUrl}/for-businesses?checkout=cancelled`,
-      }, { idempotencyKey: `service-checkout-${lead.id}-${amountCents}-${randomUUID()}` });
+      }, { idempotencyKey: `service-checkout-${lead.id}-${amountCents}-${createHash('sha256').update(parsed.data.proposalDescription).digest('hex').slice(0, 16)}` });
       if (!session.url) throw new Error('Stripe did not return a Checkout URL.');
       await prisma.leadActivity.create({
         data: {
