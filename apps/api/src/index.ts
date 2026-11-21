@@ -1267,6 +1267,67 @@ app.post('/webhooks/stripe', async (req, res) => {
       'checkout.session.async_payment_failed',
       'checkout.session.expired',
     ].includes(event.type)) {
+      if (session.metadata?.kind === 'service_request') {
+        const leadId = session.metadata.leadId;
+        const sellerId = session.metadata.sellerId;
+        const inquiryId = session.metadata.inquiryId;
+        const expectedAmount = Number(session.metadata.amountCents);
+        if (!leadId || !sellerId || !inquiryId || !Number.isSafeInteger(expectedAmount) || expectedAmount < 500) {
+          return res.status(400).json({ error: 'Service checkout is missing valid order metadata.' });
+        }
+        const lead = await prisma.lead.findFirst({
+          where: { id: leadId, ownerId: sellerId, source: 'buyer-inquiry', sourceRecordId: inquiryId },
+        });
+        if (!lead?.email) return res.status(404).json({ error: 'Service buyer record not found.' });
+        const inquiry = await prisma.buyerDemandEvent.findFirst({
+          where: { id: inquiryId, contactConsentAt: { not: null }, buyerEmail: lead.email, status: { in: ['NEW', 'CONTACTED'] } },
+        });
+        if (!inquiry) return res.status(409).json({ error: 'The original consented buyer inquiry is no longer eligible.' });
+        const checkoutEmail = (session.customer_details?.email || session.customer_email || '').toLowerCase();
+        const matches = session.mode === 'payment' &&
+          session.client_reference_id === leadId &&
+          session.amount_total === expectedAmount &&
+          session.currency?.toLowerCase() === 'usd' &&
+          checkoutEmail === lead.email.toLowerCase();
+        if (!matches) {
+          console.error('Stripe service payment does not match saved quote', { leadId, eventId: event.id });
+          return res.status(400).json({ error: 'Stripe service payment does not match the saved quote.' });
+        }
+        const activityMarker = `stripe-session:${session.id}`;
+        const existingPayment = await prisma.leadActivity.findFirst({
+          where: { leadId, type: 'service_payment_received', description: { contains: activityMarker } },
+          select: { id: true },
+        });
+        if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+          if (session.payment_status !== 'paid') return res.status(200).json({ received: true, pendingPayment: true });
+          if (!existingPayment) {
+            await prisma.$transaction([
+              prisma.lead.update({ where: { id: leadId }, data: { stage: 'WON' } }),
+              prisma.leadActivity.create({
+                data: {
+                  leadId, type: 'service_payment_received',
+                  description: JSON.stringify({
+                    marker: activityMarker, sessionId: session.id, amountCents: expectedAmount,
+                    currency: 'USD', serviceKey: session.metadata.serviceKey || 'custom-research',
+                    paymentStatus: 'paid', confirmedAt: new Date().toISOString(),
+                  }),
+                },
+              }),
+            ]);
+          }
+        } else {
+          if (!existingPayment) {
+            await prisma.leadActivity.create({
+              data: {
+                leadId, type: 'service_checkout_expired',
+                description: JSON.stringify({ sessionId: session.id, status: event.type, amountCents: expectedAmount }),
+              },
+            });
+          }
+        }
+        return res.json({ received: true, servicePayment: true });
+      }
+
       const orderId = session.metadata?.orderId;
       if (!orderId) return res.status(400).json({ error: 'Checkout session is missing its order reference.' });
 
