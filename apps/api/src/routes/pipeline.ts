@@ -396,6 +396,11 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       if (lead.email?.toLowerCase() !== inquiry.buyerEmail.toLowerCase()) {
         return res.status(409).json({ error: 'The saved buyer lead does not match the consented inquiry email.' });
       }
+      const alreadyPaid = await prisma.leadActivity.findFirst({
+        where: { leadId: lead.id, type: 'service_payment_received' },
+        select: { id: true },
+      });
+      if (alreadyPaid) return res.status(409).json({ error: 'This buyer request has already been paid. Create a new inquiry for additional work.' });
 
       const labels: Record<string, string> = {
         'supplier-intelligence': 'Supplier intelligence research',
@@ -473,6 +478,98 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
     } catch (error) {
       console.error('Service checkout creation failed', error);
       return res.status(502).json({ error: 'Unable to create service checkout. No payment was confirmed.' });
+    }
+  });
+
+
+  // Seller-only fulfillment queue for service requests confirmed paid by Stripe.
+  router.get('/service-orders', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user || (user.role !== 'seller' && user.role !== 'admin')) {
+      return res.status(403).json({ error: 'Seller or administrator access is required.' });
+    }
+    try {
+      const leads = await prisma.lead.findMany({
+        where: {
+          ...(user.role === 'admin' ? {} : { ownerId: user.id }),
+          activities: { some: { type: 'service_payment_received' } },
+        },
+        include: {
+          activities: {
+            where: { type: { in: ['service_payment_received', 'service_deliverable_ready', 'service_checkout_created'] } },
+            orderBy: { createdAt: 'desc' },
+            take: 12,
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 100,
+      });
+      const orders = leads.flatMap((lead) => {
+        const paymentActivity = lead.activities.find((item) => item.type === 'service_payment_received');
+        if (!paymentActivity) return [];
+        try {
+          const payment = JSON.parse(paymentActivity.description) as {
+            sessionId?: string; amountCents?: number; serviceKey?: string; deliveryToken?: string; paymentStatus?: string;
+          };
+          if (payment.paymentStatus !== 'paid' || !payment.deliveryToken) return [];
+          const deliveryActivity = lead.activities.find((item) => item.type === 'service_deliverable_ready');
+          const checkoutActivity = lead.activities.find((item) => item.type === 'service_checkout_created');
+          let proposalDescription = '';
+          if (checkoutActivity) {
+            try { proposalDescription = String((JSON.parse(checkoutActivity.description) as { proposalDescription?: string }).proposalDescription || ''); } catch { /* ignore malformed legacy activity */ }
+          }
+          return [{
+            leadId: lead.id, companyName: lead.companyName, buyerName: lead.contactName, buyerEmail: lead.email,
+            serviceKey: payment.serviceKey || 'custom-research', amountCents: payment.amountCents || 0,
+            paidAt: paymentActivity.createdAt, proposalDescription,
+            deliveryStatus: deliveryActivity ? 'DELIVERED' : 'AWAITING_DELIVERY',
+            deliveryToken: deliveryActivity ? payment.deliveryToken : null,
+          }];
+        } catch { return []; }
+      });
+      return res.json({ orders, count: orders.length, note: 'Only signed Stripe-webhook-confirmed service payments appear here. Delivery links are private bearer links; share them only with the paying buyer.' });
+    } catch (error) {
+      console.error('Service fulfillment queue failed', error);
+      return res.status(500).json({ error: 'Unable to load paid service orders.' });
+    }
+  });
+
+  router.post('/service-orders/:leadId/deliverable', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user || (user.role !== 'seller' && user.role !== 'admin')) {
+      return res.status(403).json({ error: 'Seller or administrator access is required.' });
+    }
+    const parsed = z.object({ content: z.string().trim().min(20).max(50000) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Enter a deliverable between 20 and 50,000 characters.' });
+    try {
+      const lead = await prisma.lead.findFirst({
+        where: { id: String(req.params.leadId), ...(user.role === 'admin' ? {} : { ownerId: user.id }) },
+        include: { activities: { where: { type: 'service_payment_received' }, orderBy: { createdAt: 'desc' }, take: 1 } },
+      });
+      if (!lead) return res.status(404).json({ error: 'Paid service order not found.' });
+      const paymentActivity = lead.activities[0];
+      if (!paymentActivity) return res.status(409).json({ error: 'A Stripe-confirmed payment is required before delivery.' });
+      const payment = JSON.parse(paymentActivity.description) as { deliveryToken?: string; paymentStatus?: string; serviceKey?: string };
+      if (payment.paymentStatus !== 'paid' || !payment.deliveryToken) {
+        return res.status(409).json({ error: 'Verified payment and delivery authorization are required.' });
+      }
+      await prisma.leadActivity.create({
+        data: {
+          leadId: lead.id, type: 'service_deliverable_ready',
+          description: JSON.stringify({
+            deliveryToken: payment.deliveryToken, content: parsed.data.content,
+            serviceKey: payment.serviceKey || 'custom-research', deliveredAt: new Date().toISOString(),
+          }),
+        },
+      });
+      const baseUrl = (process.env.FRONTEND_URL || 'https://aidatamarketplacefinal.vercel.app').replace(/\/$/, '');
+      return res.status(201).json({
+        ok: true, deliveryUrl: `${baseUrl}/service-deliveries/${payment.deliveryToken}`,
+        note: 'The secure delivery page is now available. Copy the link and send it only to the paying buyer; no email was sent automatically.',
+      });
+    } catch (error) {
+      console.error('Service deliverable save failed', error);
+      return res.status(500).json({ error: 'Unable to save the service deliverable.' });
     }
   });
 
