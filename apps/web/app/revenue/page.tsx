@@ -47,6 +47,7 @@ export default function RevenueEnginePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
+  const [servicePrices, setServicePrices] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setError('');
@@ -90,6 +91,32 @@ export default function RevenueEnginePage() {
     }
   };
 
+  const createServiceCheckout = async (inquiry: Inquiry) => {
+    const amount = Number(servicePrices[inquiry.id]);
+    if (!Number.isFinite(amount) || amount < 5 || amount > 10000) {
+      setError('Enter a quote between $5 and $10,000 before creating checkout.');
+      return;
+    }
+    setBusyId(inquiry.id);
+    setError('');
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('Please sign in first.');
+      const response = await fetch(`${API}/pipeline/buyer-inquiries/${inquiry.id}/checkout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountCents: Math.round(amount * 100) }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Could not create service checkout.');
+      if (typeof result.checkoutUrl !== 'string') throw new Error('Stripe did not return a checkout link.');
+      window.location.assign(result.checkoutUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create service checkout.');
+      setBusyId('');
+    }
+  };
+
   const totals = (data?.inquiriesByOffer || []).reduce<Record<string, number>>((acc, item) => {
     const key = item.interest || 'unspecified';
     acc[key] = (acc[key] || 0) + item.count;
@@ -117,7 +144,8 @@ export default function RevenueEnginePage() {
             </article>
             <article style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, padding: 18 }}>
               <div style={{ color: '#93a4bd', fontSize: 12 }}>Recorded paid order value</div>
-              <strong style={{ fontSize: 28 }}>{money(data.actualPaidOrderValueCents)}</strong>
+              <strong style={{ fontSize: 28 }}>{money(data.actualPaidOrderValueCents + (data.actualPaidServiceValueCents || 0))}</strong>
+              <div style={{ color: '#93a4bd', fontSize: 11 }}>Includes Stripe-confirmed service payments</div>
             </article>
             <article style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, padding: 18 }}>
               <div style={{ color: '#93a4bd', fontSize: 12 }}>Consented buyer inquiries</div>
@@ -160,6 +188,13 @@ export default function RevenueEnginePage() {
                   <span style={{ color: '#8291a7', fontSize: 11 }}>Received {new Date(item.createdAt).toLocaleString()}</span>
                   {item.status === 'NEW' && <button disabled={busyId === item.id} onClick={() => void updateStatus(item.id, 'CONTACTED')} style={{ padding: '8px 11px', borderRadius: 7, background: '#0f766e', color: 'white', border: 0 }}>Mark contacted</button>}
                   {item.status !== 'CLOSED' && <button disabled={busyId === item.id} onClick={() => void updateStatus(item.id, 'CLOSED')} style={{ padding: '8px 11px', borderRadius: 7, background: '#334155', color: 'white', border: 0 }}>Close request</button>}
+                  {['NEW', 'CONTACTED'].includes(item.status) && <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap', width: '100%', marginTop: 8 }}>
+                    <label style={{ color: '#93a4bd', fontSize: 12 }}>Your quote ($)
+                      <input type="number" min="5" max="10000" step="0.01" inputMode="decimal" value={servicePrices[item.id] || ''} onChange={event => setServicePrices(current => ({ ...current, [item.id]: event.target.value }))} placeholder="e.g. 99.00" style={{ display: 'block', marginTop: 4, padding: 8, width: 125, borderRadius: 7, border: '1px solid #475569', background: '#0b1220', color: 'white' }} />
+                    </label>
+                    <button disabled={busyId === item.id} onClick={() => void createServiceCheckout(item)} style={{ marginTop: 18, padding: '9px 13px', borderRadius: 7, background: busyId === item.id ? '#475569' : '#2563eb', color: 'white', border: 0, fontWeight: 700 }}>{busyId === item.id ? 'Preparing checkout…' : 'Create Stripe checkout'}</button>
+                    <span style={{ color: '#8291a7', fontSize: 11 }}>Buyer pays through Stripe; only confirmed payment counts as revenue.</span>
+                  </div>}
                 </div>
               </article>
             )) : <p style={{ padding: 18, color: '#93a4bd' }}>No consented inquiries yet. Share the buyer offers page to test demand.</p>}
