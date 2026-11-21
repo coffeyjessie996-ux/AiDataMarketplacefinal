@@ -636,11 +636,18 @@ app.get('/demand/revenue-summary', requireAuth, requireRole(['seller', 'admin'])
     const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
     const orderScope = user.role === 'admin' ? {} : { dataset: { sellerId: user.id } };
     const leadScope = user.role === 'admin' ? {} : { lead: { ownerId: user.id } };
+    // Buyer contact details are visible only to the seller who imported/owns the
+    // corresponding buyer-inquiry lead. Administrators retain platform-wide access.
+    const assignedInquiryIds = user.role === 'admin' ? null : (await prisma.lead.findMany({
+      where: { ownerId: user.id, source: 'buyer-inquiry', sourceRecordId: { not: null } },
+      select: { sourceRecordId: true },
+    })).map((lead) => lead.sourceRecordId).filter((id): id is string => Boolean(id));
     const inquiryWhere = {
       status: { in: ['NEW', 'CONTACTED', 'CLOSED'] },
       buyerEmail: { not: null },
       contactConsentAt: { not: null },
       createdAt: { gte: since },
+      ...(assignedInquiryIds === null ? {} : { id: { in: assignedInquiryIds } }),
     };
     const [inquiries, byOffer, paidOrders, servicePayments] = await Promise.all([
       prisma.buyerDemandEvent.findMany({
