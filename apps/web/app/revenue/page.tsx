@@ -49,6 +49,7 @@ export default function RevenueEnginePage() {
   const [data, setData] = useState<RevenueData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busyId, setBusyId] = useState('');
   const [servicePrices, setServicePrices] = useState<Record<string, string>>({});
   const [serviceScopes, setServiceScopes] = useState<Record<string, string>>({});
@@ -109,6 +110,7 @@ export default function RevenueEnginePage() {
     }
     setBusyId(inquiry.id);
     setError('');
+    setNotice('');
     try {
       const token = localStorage.getItem('auth_token');
       if (!token) throw new Error('Please sign in first.');
@@ -121,7 +123,7 @@ export default function RevenueEnginePage() {
       if (!response.ok) throw new Error(result.error || 'Could not create service checkout.');
       if (typeof result.checkoutUrl !== 'string') throw new Error('Stripe did not return a checkout link.');
       setCheckoutLinks(current => ({ ...current, [inquiry.id]: result.checkoutUrl }));
-      setError('Stripe checkout link created. Copy it and send it to the buyer who requested this quote. The seller is not being sent to the payment page.');
+      setNotice('Stripe checkout link created. Copy it and send it to the buyer who requested this quote. The seller is not being sent to the payment page.');
       setBusyId('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create service checkout.');
@@ -149,6 +151,7 @@ export default function RevenueEnginePage() {
         <h1 style={{ fontSize: 'clamp(30px, 5vw, 42px)', margin: '8px 0' }}>Revenue engine</h1>
         <p style={{ color: '#a8b6ca', lineHeight: 1.6, maxWidth: 850 }}>Track which services real buyers ask for, create seller-priced Stripe checkout for consented requests, and separate confirmed payments from demand signals.</p>
         {error && <p role="alert" style={{ padding: 12, borderRadius: 8, background: '#451a1a', color: '#fecaca' }}>{error}</p>}
+        {notice && <p role="status" style={{ padding: 12, borderRadius: 8, background: '#123329', color: '#bbf7d0' }}>{notice}</p>}
         {loading ? <p style={{ color: '#94a3b8' }}>Loading verified demand and payment records…</p> : data && <>
           <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 12, margin: '22px 0' }}>
             <article style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, padding: 18 }}>
@@ -219,7 +222,7 @@ export default function RevenueEnginePage() {
                       <label style={{ color: '#93a4bd', fontSize: 12 }}>Stripe checkout link for this buyer
                         <input readOnly value={checkoutLinks[item.id]} style={{ display: 'block', boxSizing: 'border-box', width: '100%', marginTop: 4, padding: 9, borderRadius: 7, border: '1px solid #475569', background: '#0b1220', color: 'white' }} />
                       </label>
-                      <button type="button" onClick={() => { void navigator.clipboard.writeText(checkoutLinks[item.id]).then(() => setError('Checkout link copied. Send it only to the buyer who requested the quote.')).catch(() => setError('Select and copy the checkout link above.')); }} style={{ justifySelf: 'start', padding: '8px 12px', borderRadius: 7, background: '#0f766e', color: 'white', border: 0 }}>Copy buyer checkout link</button>
+                      <button type="button" onClick={() => { void navigator.clipboard.writeText(checkoutLinks[item.id]).then(() => setNotice('Checkout link copied. Send it only to the buyer who requested the quote.')).catch(() => setError('Select and copy the checkout link above.')); }} style={{ justifySelf: 'start', padding: '8px 12px', borderRadius: 7, background: '#0f766e', color: 'white', border: 0 }}>Copy buyer checkout link</button>
                     </div>}
                   </div>}
                 </div>
