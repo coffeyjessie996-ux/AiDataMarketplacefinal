@@ -520,7 +520,7 @@ const buyerInquirySchema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.string().trim().email().max(254),
   company: z.string().trim().min(2).max(160),
-  interest: z.enum(['supplier-intelligence', 'engineering-awards', 'agency-trends', 'custom-research', 'weather-planning']),
+  interest: z.enum(['supplier-intelligence', 'engineering-awards', 'agency-trends', 'custom-research', 'weather-planning', 'supplier-monitoring', 'data-cleaning', 'rfp-intelligence', 'business-reports', 'data-api', 'workflow-automation', 'white-label-intelligence']),
   budgetRange: z.enum(['under-25', '25-49', '50-99', '100-249', '250-plus', 'not-sure']).optional().default('not-sure'),
   message: z.string().trim().max(1500).optional().default(''),
   consent: z.literal(true),
@@ -542,13 +542,13 @@ app.post('/buyer-inquiries', async (req, res) => {
     await prisma.buyerDemandEvent.create({
       data: {
         query: 'buyer_inquiry',
-        category: parsed.data.interest === 'weather-planning' ? 'weather-planning' : 'government-contracting',
+        category: parsed.data.interest,
         resultCount: 0,
         buyerName: parsed.data.name,
         buyerEmail: email,
         companyName: parsed.data.company,
         interest: parsed.data.interest,
-        message: [parsed.data.message, parsed.data.interest === 'weather-planning' ? `Monthly budget interest: ${parsed.data.budgetRange}` : ''].filter(Boolean).join('\n\n') || null,
+        message: [parsed.data.message, `Budget range: ${parsed.data.budgetRange}`].filter(Boolean).join('\n\n') || null,
         status: 'NEW',
         contactConsentAt: new Date(),
       },
@@ -597,6 +597,118 @@ app.patch('/buyer-inquiries/:id', requireAuth, requireRole(['seller', 'admin']),
 
 // Aggregate real marketplace search activity. Search phrases are collected without IPs,
 // contact details, account IDs, or browser fingerprints.
+
+app.get('/service-deliveries/:token', async (req, res) => {
+  const token = String(req.params.token || '');
+  if (!/^[0-9a-f-]{36}$/i.test(token)) return res.status(404).json({ error: 'Delivery not found.' });
+  try {
+    const delivery = await prisma.leadActivity.findFirst({
+      where: { type: 'service_deliverable_ready', description: { contains: token } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!delivery) return res.status(404).json({ error: 'Delivery is not available yet.' });
+    const payload = JSON.parse(delivery.description) as { deliveryToken?: string; content?: string; serviceKey?: string; deliveredAt?: string };
+    if (payload.deliveryToken !== token || typeof payload.content !== 'string') {
+      return res.status(404).json({ error: 'Delivery not found.' });
+    }
+    const paymentActivity = await prisma.leadActivity.findFirst({
+      where: { leadId: delivery.leadId, type: 'service_payment_received', description: { contains: token } },
+      select: { id: true, description: true },
+    });
+    if (!paymentActivity) return res.status(404).json({ error: 'Delivery not found.' });
+    const payment = JSON.parse(paymentActivity.description) as { paymentStatus?: string; deliveryToken?: string };
+    if (payment.paymentStatus !== 'paid' || payment.deliveryToken !== token) {
+      return res.status(404).json({ error: 'Delivery not found.' });
+    }
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    return res.json({ content: payload.content, serviceKey: payload.serviceKey || 'custom-research', deliveredAt: payload.deliveredAt });
+  } catch (error) {
+    console.error('Secure service delivery lookup failed', error);
+    return res.status(500).json({ error: 'Unable to load this delivery.' });
+  }
+});
+
+app.get('/demand/revenue-summary', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
+  try {
+    const user = (req as express.Request & { user?: User }).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const orderScope = user.role === 'admin' ? {} : { dataset: { sellerId: user.id } };
+    const leadScope = user.role === 'admin' ? {} : { lead: { ownerId: user.id } };
+    // Buyer contact details are visible only to the seller who imported/owns the
+    // corresponding buyer-inquiry lead. Administrators retain platform-wide access.
+    const assignedInquiryIds = user.role === 'admin' ? null : (await prisma.lead.findMany({
+      where: { ownerId: user.id, source: 'buyer-inquiry', sourceRecordId: { not: null } },
+      select: { sourceRecordId: true },
+    })).map((lead) => lead.sourceRecordId).filter((id): id is string => Boolean(id));
+    const inquiryWhere = {
+      status: { in: ['NEW', 'CONTACTED', 'CLOSED'] },
+      buyerEmail: { not: null },
+      contactConsentAt: { not: null },
+      createdAt: { gte: since },
+      ...(assignedInquiryIds === null ? {} : { id: { in: assignedInquiryIds } }),
+    };
+    const [inquiries, byOffer, paidOrders, servicePayments] = await Promise.all([
+      prisma.buyerDemandEvent.findMany({
+        where: inquiryWhere,
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+          id: true, buyerName: true, buyerEmail: true, companyName: true,
+          interest: true, message: true, status: true, createdAt: true,
+        },
+      }),
+      prisma.buyerDemandEvent.groupBy({
+        by: ['interest', 'status'],
+        where: inquiryWhere,
+        _count: { _all: true },
+        orderBy: { _count: { interest: 'desc' } },
+      }),
+      prisma.order.aggregate({
+        where: { status: 'PAID', createdAt: { gte: since }, ...nonDemoPaidOrderFilter, ...orderScope },
+        _sum: { totalCents: true },
+        _count: { _all: true },
+      }),
+      prisma.leadActivity.findMany({
+        where: { type: 'service_payment_received', createdAt: { gte: since }, ...leadScope },
+        select: { description: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      }),
+    ]);
+    const confirmedServicePayments = servicePayments.flatMap((activity) => {
+      try {
+        const item = JSON.parse(activity.description) as { amountCents?: number; paymentStatus?: string };
+        return item.paymentStatus === 'paid' && Number.isSafeInteger(item.amountCents) && Number(item.amountCents) > 0
+          ? [{ amountCents: Number(item.amountCents), createdAt: activity.createdAt }] : [];
+      } catch { return []; }
+    });
+    return res.json({
+      windowDays: 90,
+      updatedAt: new Date().toISOString(),
+      inquiries,
+      inquiriesByOffer: byOffer.map((item) => ({
+        interest: item.interest,
+        status: item.status,
+        count: item._count._all,
+      })),
+      actualPaidOrderValueCents: paidOrders._sum.totalCents ?? 0,
+      actualPaidOrders: paidOrders._count._all,
+      actualPaidServiceValueCents: confirmedServicePayments.reduce((sum, item) => sum + item.amountCents, 0),
+      actualPaidServiceOrders: confirmedServicePayments.length,
+      actualPaidTotalValueCents: (paidOrders._sum.totalCents ?? 0) + confirmedServicePayments.reduce((sum, item) => sum + item.amountCents, 0),
+      definitions: {
+        inquiries: 'Only buyer inquiries with an email address and recorded permission to follow up.',
+        revenue: 'Only non-demo dataset orders and service checkouts recorded PAID by the signed Stripe webhook. Inquiries, quotes, and forecasts are not revenue.',
+      },
+    });
+  } catch (error) {
+    console.error('Revenue demand summary failed', error);
+    return res.status(500).json({ error: 'Unable to load revenue demand summary.' });
+  }
+});
+
 app.get('/demand/summary', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
   try {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -1214,6 +1326,72 @@ app.post('/webhooks/stripe', async (req, res) => {
       'checkout.session.async_payment_failed',
       'checkout.session.expired',
     ].includes(event.type)) {
+      if (session.metadata?.kind === 'service_request') {
+        const leadId = session.metadata.leadId;
+        const sellerId = session.metadata.sellerId;
+        const inquiryId = session.metadata.inquiryId;
+        const expectedAmount = Number(session.metadata.amountCents);
+        if (!leadId || !sellerId || !inquiryId || !Number.isSafeInteger(expectedAmount) || expectedAmount < 500) {
+          return res.status(400).json({ error: 'Service checkout is missing valid order metadata.' });
+        }
+        const lead = await prisma.lead.findFirst({
+          where: { id: leadId, ownerId: sellerId, source: 'buyer-inquiry', sourceRecordId: inquiryId },
+        });
+        if (!lead?.email) return res.status(404).json({ error: 'Service buyer record not found.' });
+        const inquiry = await prisma.buyerDemandEvent.findFirst({
+          where: { id: inquiryId, contactConsentAt: { not: null }, buyerEmail: lead.email },
+        });
+        if (!inquiry) return res.status(409).json({ error: 'The original consented buyer inquiry is no longer eligible.' });
+        const checkoutEmail = (session.customer_details?.email || session.customer_email || '').toLowerCase();
+        const matches = session.mode === 'payment' &&
+          session.client_reference_id === leadId &&
+          session.amount_total === expectedAmount &&
+          session.currency?.toLowerCase() === 'usd' &&
+          checkoutEmail === lead.email.toLowerCase();
+        if (!matches) {
+          console.error('Stripe service payment does not match saved quote', { leadId, eventId: event.id });
+          return res.status(400).json({ error: 'Stripe service payment does not match the saved quote.' });
+        }
+        const activityMarker = `stripe-session:${session.id}`;
+        const existingPayment = await prisma.leadActivity.findFirst({
+          where: { leadId, type: 'service_payment_received', description: { contains: activityMarker } },
+          select: { id: true },
+        });
+        if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+          if (session.payment_status !== 'paid') return res.status(200).json({ received: true, pendingPayment: true });
+          if (!existingPayment) {
+            await prisma.$transaction([
+              prisma.lead.update({ where: { id: leadId }, data: { stage: 'WON' } }),
+              prisma.buyerDemandEvent.updateMany({
+                where: { id: inquiryId, contactConsentAt: { not: null } },
+                data: { status: 'PAID' },
+              }),
+              prisma.leadActivity.create({
+                data: {
+                  id: `stripe_${createHash('sha256').update(session.id).digest('hex').slice(0, 32)}`,
+                  leadId, type: 'service_payment_received',
+                  description: JSON.stringify({
+                    marker: activityMarker, sessionId: session.id, amountCents: expectedAmount,
+                    currency: 'USD', serviceKey: session.metadata.serviceKey || 'custom-research',
+                    paymentStatus: 'paid', deliveryToken: randomUUID(), confirmedAt: new Date().toISOString(),
+                  }),
+                },
+              }),
+            ]);
+          }
+        } else {
+          if (!existingPayment) {
+            await prisma.leadActivity.create({
+              data: {
+                leadId, type: 'service_checkout_expired',
+                description: JSON.stringify({ sessionId: session.id, status: event.type, amountCents: expectedAmount }),
+              },
+            });
+          }
+        }
+        return res.json({ received: true, servicePayment: true });
+      }
+
       const orderId = session.metadata?.orderId;
       if (!orderId) return res.status(400).json({ error: 'Checkout session is missing its order reference.' });
 

@@ -1,4 +1,6 @@
 import express from 'express';
+import Stripe from 'stripe';
+import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
@@ -132,6 +134,47 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
     }
     return res.json({ source: 'USAspending.gov', recordsReviewed: records.length, leadsCreatedOrExisting: imported,
       note: 'Priority reflects public-record completeness and contactability, not supplier verification or predicted conversion. Records without an email, website, or named contact are capped at 59.' });
+  });
+
+  // Import only buyer inquiries where the visitor explicitly consented to follow-up.
+  // Supplier records and anonymous searches are not treated as buyer prospects.
+  router.post('/leads/import-buyer-inquiries', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    try {
+      const inquiries = await prisma.buyerDemandEvent.findMany({
+        where: { contactConsentAt: { not: null }, buyerEmail: { not: null }, status: { in: ['NEW', 'CONTACTED'] } },
+        orderBy: { createdAt: 'desc' }, take: 300,
+      });
+      let imported = 0;
+      for (const inquiry of inquiries) {
+        const email = inquiry.buyerEmail?.trim().toLowerCase();
+        if (!email || !email.includes('@')) continue;
+        const companyName = inquiry.companyName?.trim() || inquiry.buyerName?.trim() || email;
+        const description = [
+          inquiry.interest ? `Buyer-requested interest: ${inquiry.interest}` : '',
+          inquiry.message ? `Buyer message: ${inquiry.message.slice(0, 1800)}` : '',
+          'This contact submitted a marketplace inquiry and consented to follow-up.',
+        ].filter(Boolean).join(' • ').slice(0, 2500);
+        const sourceKey = `buyer-inquiry:${inquiry.id}:${user.id}`;
+        const priority = calculateLeadPriority({ companyName, source: 'buyer-inquiry', description, contactName: inquiry.buyerName, email });
+        await prisma.lead.upsert({
+          where: { sourceKey },
+          create: {
+            id: randomUUID(), ownerId: user.id, source: 'buyer-inquiry', sourceRecordId: inquiry.id,
+            sourceKey, companyName: companyName.slice(0, 200), contactName: inquiry.buyerName?.slice(0, 160) ?? null,
+            email, description, score: priority.score,
+            activities: { create: { type: 'buyer_inquiry_imported', description: 'Imported from a buyer inquiry with recorded follow-up consent.' } },
+          },
+          update: { companyName: companyName.slice(0, 200), contactName: inquiry.buyerName?.slice(0, 160) ?? null, email, description, score: priority.score },
+        });
+        imported++;
+      }
+      return res.json({ source: 'consented buyer inquiries', inquiriesReviewed: inquiries.length, leadsCreatedOrExisting: imported, note: 'Only inquiries with a recorded contact-consent timestamp and email are imported. No email is sent automatically.' });
+    } catch (error) {
+      console.error('Consented buyer inquiry import failed', error);
+      return res.status(500).json({ error: 'Unable to import consented buyer inquiries.' });
+    }
   });
 
   // AI sales assistant: create an evidence-based outreach draft for human review.
@@ -297,6 +340,240 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       ...(data.stage && data.stage !== lead.stage ? { activities: { create: { type: 'stage_changed', description: `Stage changed to ${data.stage}.` } } } : {}),
     } });
     return res.json({ lead: updated });
+  });
+
+
+  // Turn an explicitly consented buyer inquiry into a one-time, seller-priced Stripe checkout.
+  // The seller chooses the amount; only the Stripe webhook can record the service as paid.
+  router.post('/buyer-inquiries/:id/checkout', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user || (user.role !== 'seller' && user.role !== 'admin')) {
+      return res.status(403).json({ error: 'Seller or administrator access is required.' });
+    }
+    if (process.env.STRIPE_CHECKOUT_ENABLED !== 'true') {
+      return res.status(503).json({ error: 'Service checkout is not enabled.' });
+    }
+    const parsed = z.object({
+      amountCents: z.number().int().min(500).max(1_000_000),
+      proposalDescription: z.string().trim().min(20).max(1000),
+    }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Enter a price between $5 and $10,000 and describe the deliverables (at least 20 characters).' });
+
+    const isPreview = process.env.VERCEL_ENV === 'preview';
+    const secretKey = isPreview ? process.env.STRIPE_SECRET_TEST_KEY : process.env.STRIPE_SECRET_KEY;
+    if (!secretKey || (isPreview && !secretKey.startsWith('sk_test_')) ||
+        (process.env.VERCEL_ENV === 'production' && !secretKey.startsWith('sk_live_'))) {
+      return res.status(503).json({ error: 'A matching Stripe key is not configured for this environment.' });
+    }
+
+    try {
+      const inquiry = await prisma.buyerDemandEvent.findFirst({
+        where: {
+          id: String(req.params.id),
+          contactConsentAt: { not: null },
+          buyerEmail: { not: null },
+          status: { in: ['NEW', 'CONTACTED'] },
+        },
+      });
+      if (!inquiry?.buyerEmail) return res.status(404).json({ error: 'A contactable, open buyer inquiry was not found.' });
+
+      const ownerId = user.id;
+      const sourceKey = `buyer-inquiry:${inquiry.id}:${ownerId}`;
+      const companyName = inquiry.companyName?.trim() || inquiry.buyerName?.trim() || inquiry.buyerEmail;
+      const lead = await prisma.lead.upsert({
+        where: { sourceKey },
+        create: {
+          ownerId, source: 'buyer-inquiry', sourceRecordId: inquiry.id, sourceKey,
+          companyName: companyName.slice(0, 200),
+          contactName: inquiry.buyerName?.slice(0, 160) ?? null,
+          email: inquiry.buyerEmail.toLowerCase(),
+          description: [inquiry.interest ? `Requested service: ${inquiry.interest}` : '', inquiry.message || ''].filter(Boolean).join(' • ').slice(0, 2400),
+          notes: 'Buyer submitted this inquiry and explicitly consented to follow-up. Service checkout is a seller-priced quote; deliverables and timing must be agreed before work begins.',
+          activities: { create: { type: 'buyer_inquiry_imported', description: 'Created from a buyer inquiry with recorded follow-up consent.' } },
+        },
+        update: {},
+      });
+      if (lead.email?.toLowerCase() !== inquiry.buyerEmail.toLowerCase()) {
+        return res.status(409).json({ error: 'The saved buyer lead does not match the consented inquiry email.' });
+      }
+      const alreadyPaid = await prisma.leadActivity.findFirst({
+        where: { leadId: lead.id, type: 'service_payment_received' },
+        select: { id: true },
+      });
+      if (alreadyPaid) return res.status(409).json({ error: 'This buyer request has already been paid. Create a new inquiry for additional work.' });
+
+      const labels: Record<string, string> = {
+        'supplier-intelligence': 'Supplier intelligence research',
+        'engineering-awards': 'Engineering awards research',
+        'agency-trends': 'Agency and market trends research',
+        'custom-research': 'Custom business research',
+        'weather-planning': 'Weather planning research',
+        'supplier-monitoring': 'Supplier monitoring service',
+        'data-cleaning': 'Customer-authorized data cleaning',
+        'rfp-intelligence': 'RFP and contract intelligence research',
+        'business-reports': 'Industry and business report',
+        'data-api': 'Business data access service',
+        'workflow-automation': 'Business workflow automation service',
+        'white-label-intelligence': 'White-label intelligence report',
+      };
+      const serviceName = labels[inquiry.interest || ''] || 'Custom business research service';
+      const amountCents = parsed.data.amountCents;
+      const stripe = new Stripe(secretKey);
+      const previous = await prisma.leadActivity.findFirst({
+        where: { leadId: lead.id, type: 'service_checkout_created' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (previous) {
+        try {
+          const previousData = JSON.parse(previous.description) as { sessionId?: string; amountCents?: number; proposalDescription?: string };
+          if (previousData.sessionId) {
+            const existing = await stripe.checkout.sessions.retrieve(previousData.sessionId);
+            if (existing.status === 'complete' || existing.payment_status === 'paid') {
+              return res.status(409).json({ error: 'A previous checkout has completed or is awaiting payment confirmation. Refresh the revenue dashboard before creating another quote.' });
+            }
+            if (existing.status === 'open' && existing.url &&
+                previousData.amountCents === amountCents &&
+                previousData.proposalDescription === parsed.data.proposalDescription) {
+              return res.json({ checkoutUrl: existing.url, reused: true, amountCents, currency: 'USD' });
+            }
+            if (existing.status === 'open') {
+              await stripe.checkout.sessions.expire(previousData.sessionId);
+            }
+          }
+        } catch { /* Expired or unavailable session: create a fresh idempotent checkout. */ }
+      }
+
+      const baseUrl = (process.env.FRONTEND_URL || 'https://aidatamarketplacefinal.vercel.app').replace(/\/$/, '');
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer_email: inquiry.buyerEmail.toLowerCase(),
+        client_reference_id: lead.id,
+        line_items: [{
+          quantity: 1,
+          price_data: {
+            currency: 'usd',
+            unit_amount: amountCents,
+            product_data: {
+              name: serviceName.slice(0, 250),
+              description: parsed.data.proposalDescription.slice(0, 500),
+            },
+          },
+        }],
+        metadata: {
+          kind: 'service_request',
+          leadId: lead.id,
+          sellerId: ownerId,
+          inquiryId: inquiry.id,
+          serviceKey: inquiry.interest || 'custom-research',
+          amountCents: String(amountCents),
+        },
+        success_url: `${baseUrl}/service-checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/for-businesses?checkout=cancelled`,
+      }, { idempotencyKey: `service-checkout-${lead.id}-${randomUUID()}` });
+      if (!session.url) throw new Error('Stripe did not return a Checkout URL.');
+      await prisma.leadActivity.create({
+        data: {
+          leadId: lead.id, type: 'service_checkout_created',
+          description: JSON.stringify({ sessionId: session.id, amountCents, serviceKey: inquiry.interest || 'custom-research', proposalDescription: parsed.data.proposalDescription, createdAt: new Date().toISOString() }),
+        },
+      });
+      return res.status(201).json({ checkoutUrl: session.url, amountCents, currency: 'USD', status: 'pending' });
+    } catch (error) {
+      console.error('Service checkout creation failed', error);
+      return res.status(502).json({ error: 'Unable to create service checkout. No payment was confirmed.' });
+    }
+  });
+
+
+  // Seller-only fulfillment queue for service requests confirmed paid by Stripe.
+  router.get('/service-orders', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user || (user.role !== 'seller' && user.role !== 'admin')) {
+      return res.status(403).json({ error: 'Seller or administrator access is required.' });
+    }
+    try {
+      const leads = await prisma.lead.findMany({
+        where: {
+          ...(user.role === 'admin' ? {} : { ownerId: user.id }),
+          activities: { some: { type: 'service_payment_received' } },
+        },
+        include: {
+          activities: {
+            where: { type: { in: ['service_payment_received', 'service_deliverable_ready', 'service_checkout_created'] } },
+            orderBy: { createdAt: 'desc' },
+            take: 12,
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 100,
+      });
+      const orders = leads.flatMap((lead) => {
+        const paymentActivity = lead.activities.find((item) => item.type === 'service_payment_received');
+        if (!paymentActivity) return [];
+        try {
+          const payment = JSON.parse(paymentActivity.description) as {
+            sessionId?: string; amountCents?: number; serviceKey?: string; deliveryToken?: string; paymentStatus?: string;
+          };
+          if (payment.paymentStatus !== 'paid' || !payment.deliveryToken) return [];
+          const deliveryActivity = lead.activities.find((item) => item.type === 'service_deliverable_ready');
+          const checkoutActivity = lead.activities.find((item) => item.type === 'service_checkout_created');
+          let proposalDescription = '';
+          if (checkoutActivity) {
+            try { proposalDescription = String((JSON.parse(checkoutActivity.description) as { proposalDescription?: string }).proposalDescription || ''); } catch { /* ignore malformed legacy activity */ }
+          }
+          return [{
+            leadId: lead.id, companyName: lead.companyName, buyerName: lead.contactName, buyerEmail: lead.email,
+            serviceKey: payment.serviceKey || 'custom-research', amountCents: payment.amountCents || 0,
+            paidAt: paymentActivity.createdAt, proposalDescription,
+            deliveryStatus: deliveryActivity ? 'DELIVERED' : 'AWAITING_DELIVERY',
+            deliveryToken: deliveryActivity ? payment.deliveryToken : null,
+          }];
+        } catch { return []; }
+      });
+      return res.json({ orders, count: orders.length, note: 'Only signed Stripe-webhook-confirmed service payments appear here. Delivery links are private bearer links; share them only with the paying buyer.' });
+    } catch (error) {
+      console.error('Service fulfillment queue failed', error);
+      return res.status(500).json({ error: 'Unable to load paid service orders.' });
+    }
+  });
+
+  router.post('/service-orders/:leadId/deliverable', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user || (user.role !== 'seller' && user.role !== 'admin')) {
+      return res.status(403).json({ error: 'Seller or administrator access is required.' });
+    }
+    const parsed = z.object({ content: z.string().trim().min(20).max(50000) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Enter a deliverable between 20 and 50,000 characters.' });
+    try {
+      const lead = await prisma.lead.findFirst({
+        where: { id: String(req.params.leadId), ...(user.role === 'admin' ? {} : { ownerId: user.id }) },
+        include: { activities: { where: { type: 'service_payment_received' }, orderBy: { createdAt: 'desc' }, take: 1 } },
+      });
+      if (!lead) return res.status(404).json({ error: 'Paid service order not found.' });
+      const paymentActivity = lead.activities[0];
+      if (!paymentActivity) return res.status(409).json({ error: 'A Stripe-confirmed payment is required before delivery.' });
+      const payment = JSON.parse(paymentActivity.description) as { deliveryToken?: string; paymentStatus?: string; serviceKey?: string };
+      if (payment.paymentStatus !== 'paid' || !payment.deliveryToken) {
+        return res.status(409).json({ error: 'Verified payment and delivery authorization are required.' });
+      }
+      await prisma.leadActivity.create({
+        data: {
+          leadId: lead.id, type: 'service_deliverable_ready',
+          description: JSON.stringify({
+            deliveryToken: payment.deliveryToken, content: parsed.data.content,
+            serviceKey: payment.serviceKey || 'custom-research', deliveredAt: new Date().toISOString(),
+          }),
+        },
+      });
+      const baseUrl = (process.env.FRONTEND_URL || 'https://aidatamarketplacefinal.vercel.app').replace(/\/$/, '');
+      return res.status(201).json({
+        ok: true, deliveryUrl: `${baseUrl}/service-deliveries/${payment.deliveryToken}`,
+        note: 'The secure delivery page is now available. Copy the link and send it only to the paying buyer; no email was sent automatically.',
+      });
+    } catch (error) {
+      console.error('Service deliverable save failed', error);
+      return res.status(500).json({ error: 'Unable to save the service deliverable.' });
+    }
   });
 
   router.get('/sales', async (req, res) => {
