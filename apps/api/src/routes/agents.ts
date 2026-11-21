@@ -4,7 +4,7 @@ import type { User } from '../types';
 import { SOURCE_RIGHTS_POLICY } from '../services/source-rights';
 
 type AuthReq = express.Request & { user?: User };
-const agentJobs = ['research_opportunity_scan', 'data_rights_audit', 'buyer_pipeline_audit'] as const;
+const agentJobs = ['research_opportunity_scan', 'data_rights_audit', 'buyer_pipeline_audit', 'revenue_readiness_audit'] as const;
 type AgentJob = (typeof agentJobs)[number];
 
 export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHandler) {
@@ -25,6 +25,7 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
       { id: 'research_opportunity_scan', name: 'Research & Opportunity Agent', purpose: 'Summarizes existing internal research records and identifies missing evidence.', actions: 'Read-only database analysis; no scraping or external contact.' },
       { id: 'data_rights_audit', name: 'Data Production & Rights Agent', purpose: 'Checks datasets, listings, and source tags against the source-rights register.', actions: 'Read-only compliance audit; cannot publish or price data.' },
       { id: 'buyer_pipeline_audit', name: 'Buyer & Sales Support Agent', purpose: 'Summarizes buyer inquiries and sales-pipeline stages for human follow-up.', actions: 'Read-only pipeline analysis; cannot send messages or change deal stages.' },
+      { id: 'revenue_readiness_audit', name: 'Revenue & Product Readiness Agent', purpose: 'Ranks real buyer demand, checks approved product readiness, and identifies the next revenue actions.', actions: 'Read-only analysis of consented inquiries, approved sources, published products, and Stripe-confirmed orders.' },
     ],
     executionMode: 'manual_on_demand',
     externalActionsEnabled: false,
@@ -42,6 +43,7 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
       research_opportunity_scan: { name: 'Research & Opportunity Agent', task: 'Review internal research records' },
       data_rights_audit: { name: 'Data Production & Rights Agent', task: 'Audit dataset publication rights' },
       buyer_pipeline_audit: { name: 'Buyer & Sales Support Agent', task: 'Review buyer demand and sales pipeline' },
+      revenue_readiness_audit: { name: 'Revenue & Product Readiness Agent', task: 'Analyze demand and revenue readiness' },
     };
     let taskId: string | null = null;
     try {
@@ -77,6 +79,68 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
         const unresolved = [...sourceNames].filter((source) => SOURCE_RIGHTS_POLICY[source]?.status !== 'commercial_reuse_approved');
         recordsFetched = datasets.length;
         message = `Rights audit complete. ${datasets.length} datasets, ${listings} listings, ${published} published datasets, ${openAuctions} open auctions. Tagged sources: ${[...sourceNames].join(', ') || 'none'}. Approved sources: ${approved.join(', ') || 'none'}. Unresolved or unregistered sources: ${unresolved.join(', ') || 'none'}. No data was published or changed.`;
+      } else if (job === 'revenue_readiness_audit') {
+        const sellerScope = isAdmin ? {} : { sellerId: user.id };
+        const [inquiries, byInterest, datasets, paidOrders] = await Promise.all([
+          prisma.buyerDemandEvent.count({
+            where: { contactConsentAt: { not: null }, buyerEmail: { not: null }, status: { in: ['NEW', 'CONTACTED'] } },
+          }),
+          prisma.buyerDemandEvent.groupBy({
+            by: ['interest'],
+            where: { contactConsentAt: { not: null }, buyerEmail: { not: null }, status: { in: ['NEW', 'CONTACTED'] } },
+            _count: { _all: true },
+            orderBy: { _count: { interest: 'desc' } },
+            take: 8,
+          }),
+          prisma.dataset.findMany({
+            where: { ...sellerScope, status: 'PUBLISHED', seller: { isNot: { email: { endsWith: '@local.test' } } }, title: { not: { contains: '(Sample)' } } },
+            select: { id: true, title: true, tags: true, priceCents: true },
+            take: 200,
+          }),
+          prisma.order.aggregate({
+            where: {
+              status: 'PAID',
+              buyer: { isNot: { email: { endsWith: '@local.test' } } },
+              dataset: { is: {
+                ...sellerScope,
+                seller: { isNot: { email: { endsWith: '@local.test' } } },
+                title: { not: { contains: '(Sample)' } },
+              } },
+            },
+            _sum: { totalCents: true },
+            _count: { _all: true },
+          }),
+        ]);
+        const productChecks = datasets.map((dataset) => {
+          const sourceNames = dataset.tags.filter((tag) => tag.startsWith('source:')).map((tag) => tag.slice(7));
+          const rightsReviewed = dataset.tags.includes('license-review-status:seller_reviewed') &&
+            dataset.tags.some((tag) => tag.startsWith('license-review-evidence:'));
+          const factoryReady = dataset.tags.includes('factory:v1');
+          const allSourcesApproved = sourceNames.length > 0 &&
+            sourceNames.every((source) => SOURCE_RIGHTS_POLICY[source]?.status === 'commercial_reuse_approved');
+          return { id: dataset.id, title: dataset.title, priceCents: dataset.priceCents, rightsReviewed, factoryReady, allSourcesApproved,
+            checkoutReady: rightsReviewed && factoryReady && allSourcesApproved && sourceNames.length === 1 && sourceNames[0] === 'nws_api_forecasts' };
+        });
+        const readyProducts = productChecks.filter((item) => item.checkoutReady).length;
+        const demand = byInterest.map((item) => ({ service: item.interest || 'unspecified', inquiries: item._count._all }));
+        const topDemand = demand[0];
+        const priorities = [
+          ...(topDemand ? [{ priority: 1, action: `Follow up on ${topDemand.inquiries} consented ${topDemand.service} buyer inquiries.`, basis: 'Recorded buyer requests', requiresHumanApproval: true }] :
+            [{ priority: 1, action: 'Validate demand by collecting the first consented buyer inquiries.', basis: 'No open consented buyer requests yet', requiresHumanApproval: false }]),
+          ...(readyProducts === 0 ? [{ priority: 2, action: 'Review source rights and delivery evidence before publishing any dataset for automated checkout.', basis: `${datasets.length} published non-demo datasets checked; none meet current checkout safeguards`, requiresHumanApproval: true }] :
+            [{ priority: 2, action: `Review and promote the ${readyProducts} dataset(s) that meet the current automated checkout checks.`, basis: 'Published product tags and approved NWS source policy', requiresHumanApproval: true }]),
+          ...(paidOrders._count._all === 0 ? [{ priority: 3, action: 'Secure the first real paid order; do not treat inquiries, listings, or forecast values as revenue.', basis: 'No Stripe-confirmed paid dataset orders in this seller scope', requiresHumanApproval: true }] :
+            [{ priority: 3, action: 'Improve conversion and delivery for existing paid dataset orders.', basis: `${paidOrders._count._all} Stripe-confirmed orders; gross value $ ${((paidOrders._sum.totalCents ?? 0) / 100).toFixed(2)}`, requiresHumanApproval: true }]),
+        ];
+        recordsFetched = inquiries + datasets.length + paidOrders._count._all;
+        message = `Revenue readiness scan complete: ${inquiries} open consented buyer inquiries, ${readyProducts} checkout-ready dataset(s), ${paidOrders._count._all} paid dataset orders. No outreach, publishing, bidding, or payments were executed.`;
+        const revenuePlan = { demand, publishedDatasetsChecked: datasets.length, checkoutReadyProducts: readyProducts,
+          actualPaidDatasetOrders: paidOrders._count._all, actualPaidDatasetValueCents: paidOrders._sum.totalCents ?? 0, priorities };
+        await prisma.agentTaskRun.update({ where: { id: taskId }, data: {
+          status: 'COMPLETED', message: message.slice(0, 500), recordsFetched, recordsSaved: 0, recordsFailed: 0, completedAt: new Date(),
+        } });
+        return res.json({ ok: true, taskId, agentId: job, message, revenuePlan,
+          note: 'Recommendations are based on stored records. Forecasts, award values, inquiries, and listings are not revenue. No external actions were taken.' });
       } else {
         const [leads, byStage, inquiries] = await Promise.all([
           prisma.lead.count({ where: isAdmin ? {} : { ownerId: user.id } }),
