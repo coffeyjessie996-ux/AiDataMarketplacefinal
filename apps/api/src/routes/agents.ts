@@ -1,7 +1,7 @@
 import express from 'express';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
-import { SOURCE_RIGHTS_POLICY } from '../services/source-rights';
+import { isApprovedNwsForecastRecord, SOURCE_RIGHTS_POLICY } from '../services/source-rights';
 
 type AuthReq = express.Request & { user?: User };
 const agentJobs = ['research_opportunity_scan', 'data_rights_audit', 'buyer_pipeline_audit', 'revenue_readiness_audit'] as const;
@@ -111,15 +111,26 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
             _count: { _all: true },
           }),
         ]);
+        const allRecordIds = [...new Set(datasets.flatMap((dataset) =>
+          dataset.tags.filter((tag) => tag.startsWith('source-record-id:')).map((tag) => tag.slice('source-record-id:'.length)),
+        ))];
+        const approvedRecords = allRecordIds.length ? await prisma.supplierResearchRecord.findMany({
+          where: { id: { in: allRecordIds }, source: 'nws_api_forecasts' },
+          select: { id: true, sourceUrl: true, payload: true },
+        }) : [];
+        const approvedRecordIds = new Set(approvedRecords.filter(isApprovedNwsForecastRecord).map((record) => record.id));
         const productChecks = datasets.map((dataset) => {
           const sourceNames = dataset.tags.filter((tag) => tag.startsWith('source:')).map((tag) => tag.slice(7));
+          const recordIds = dataset.tags.filter((tag) => tag.startsWith('source-record-id:')).map((tag) => tag.slice('source-record-id:'.length));
           const rightsReviewed = dataset.tags.includes('license-review-status:seller_reviewed') &&
             dataset.tags.some((tag) => tag.startsWith('license-review-evidence:'));
           const factoryReady = dataset.tags.includes('factory:v1');
-          const allSourcesApproved = sourceNames.length > 0 &&
+          const allSourcesApproved = sourceNames.length === 1 && sourceNames[0] === 'nws_api_forecasts' &&
             sourceNames.every((source) => SOURCE_RIGHTS_POLICY[source]?.status === 'commercial_reuse_approved');
-          return { id: dataset.id, title: dataset.title, priceCents: dataset.priceCents, rightsReviewed, factoryReady, allSourcesApproved,
-            checkoutReady: rightsReviewed && factoryReady && allSourcesApproved && sourceNames.length === 1 && sourceNames[0] === 'nws_api_forecasts' };
+          const recordsDeliverable = recordIds.length > 0 && new Set(recordIds).size === recordIds.length &&
+            recordIds.every((id) => approvedRecordIds.has(id));
+          return { id: dataset.id, title: dataset.title, priceCents: dataset.priceCents, rightsReviewed, factoryReady,
+            allSourcesApproved, recordsDeliverable, checkoutReady: rightsReviewed && factoryReady && allSourcesApproved && recordsDeliverable };
         });
         const readyProducts = productChecks.filter((item) => item.checkoutReady).length;
         const demand = byInterest.map((item) => ({ service: item.interest || 'unspecified', inquiries: item._count._all }));
