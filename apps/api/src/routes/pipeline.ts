@@ -1,5 +1,6 @@
 import express from 'express';
 import Stripe from 'stripe';
+import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
