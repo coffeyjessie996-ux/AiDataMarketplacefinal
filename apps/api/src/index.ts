@@ -627,7 +627,7 @@ app.get('/demand/revenue-summary', requireAuth, requireRole(['seller', 'admin'])
         orderBy: { _count: { interest: 'desc' } },
       }),
       prisma.order.aggregate({
-        where: { status: 'PAID', ...nonDemoPaidOrderFilter, ...orderScope },
+        where: { status: 'PAID', createdAt: { gte: since }, ...nonDemoPaidOrderFilter, ...orderScope },
         _sum: { totalCents: true },
         _count: { _all: true },
       }),
