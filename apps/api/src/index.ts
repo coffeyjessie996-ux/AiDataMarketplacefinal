@@ -1329,6 +1329,7 @@ app.post('/webhooks/stripe', async (req, res) => {
               }),
               prisma.leadActivity.create({
                 data: {
+                  id: `stripe_${createHash('sha256').update(session.id).digest('hex').slice(0, 32)}`,
                   leadId, type: 'service_payment_received',
                   description: JSON.stringify({
                     marker: activityMarker, sessionId: session.id, amountCents: expectedAmount,
