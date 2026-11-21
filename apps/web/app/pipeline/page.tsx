@@ -189,7 +189,7 @@ export default function PipelinePage() {
       </nav>
       <p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 12, fontWeight: 700 }}>GROWTH OPERATIONS</p>
       <h1 style={{ fontSize: 36, margin: '8px 0' }}>Sales & Opportunity Pipeline</h1>
-      <p style={{ color: '#a8b6ca', lineHeight: 1.6 }}>This pipeline combines supplier research with buyer inquiries that explicitly consented to follow-up. Public supplier records and job listings are not confirmed buyers, contract awards to you, or earned revenue.</p>
+      <p style={{ color: '#a8b6ca', lineHeight: 1.6 }}>This pipeline combines supplier research with buyer inquiries that explicitly consented to follow-up. Public supplier records and job listings are not a confirmed buyer, contract award to you, or earned revenue.</p>
       <p style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.5 }}>AI-assisted outreach and closing content on this page is draft-only for human review. Nothing is sent automatically.</p>
       <section aria-label="Revenue node" style={{ background: '#101a2b', border: '1px solid #2563eb', borderRadius: 12, padding: 18, margin: '22px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
