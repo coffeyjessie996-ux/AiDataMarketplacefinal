@@ -125,6 +125,7 @@ export default function AgentActivityPage() {
               { id: 'research_opportunity_scan', title: '1. Research & opportunity finder', detail: 'Review saved research records and source coverage.' },
               { id: 'data_rights_audit', title: '2. Data production & rights audit', detail: 'Check datasets, listings, auctions, and source approval.' },
               { id: 'buyer_pipeline_audit', title: '3. Buyer & sales support', detail: 'Summarize buyer inquiries and lead stages.' },
+              { id: 'revenue_readiness_audit', title: '4. Revenue & product readiness', detail: 'Rank real buyer demand, check approved products, and identify next revenue actions.' },
             ].map(agent => <article key={agent.id} style={{ background: '#17263a', border: '1px solid #334155', borderRadius: 9, padding: 14 }}>
               <strong>{agent.title}</strong><p style={{ color: '#a8b6ca', minHeight: 42, fontSize: 13 }}>{agent.detail}</p>
               <button disabled={Boolean(runningAgent)} onClick={() => void runAgent(agent.id)} style={{ padding: '9px 12px', border: 0, borderRadius: 7, background: runningAgent === agent.id ? '#475569' : '#2563eb', color: 'white', cursor: runningAgent ? 'wait' : 'pointer' }}>{runningAgent === agent.id ? 'Running…' : 'Run agent'}</button>
