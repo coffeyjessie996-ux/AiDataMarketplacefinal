@@ -597,16 +597,20 @@ app.patch('/buyer-inquiries/:id', requireAuth, requireRole(['seller', 'admin']),
 
 // Aggregate real marketplace search activity. Search phrases are collected without IPs,
 // contact details, account IDs, or browser fingerprints.
-app.get('/demand/revenue-summary', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
+app.get('/demand/revenue-summary', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
   try {
+    const user = (req as express.Request & { user?: User }).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
     const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const orderScope = user.role === 'admin' ? {} : { dataset: { sellerId: user.id } };
+    const leadScope = user.role === 'admin' ? {} : { lead: { ownerId: user.id } };
     const inquiryWhere = {
       status: { in: ['NEW', 'CONTACTED', 'CLOSED'] },
       buyerEmail: { not: null },
       contactConsentAt: { not: null },
       createdAt: { gte: since },
     };
-    const [inquiries, byOffer, paidOrders] = await Promise.all([
+    const [inquiries, byOffer, paidOrders, servicePayments] = await Promise.all([
       prisma.buyerDemandEvent.findMany({
         where: inquiryWhere,
         orderBy: { createdAt: 'desc' },
@@ -623,11 +627,24 @@ app.get('/demand/revenue-summary', requireAuth, requireRole(['seller', 'admin'])
         orderBy: { _count: { interest: 'desc' } },
       }),
       prisma.order.aggregate({
-        where: { status: 'PAID', ...nonDemoPaidOrderFilter },
+        where: { status: 'PAID', ...nonDemoPaidOrderFilter, ...orderScope },
         _sum: { totalCents: true },
         _count: { _all: true },
       }),
+      prisma.leadActivity.findMany({
+        where: { type: 'service_payment_received', createdAt: { gte: since }, ...leadScope },
+        select: { description: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      }),
     ]);
+    const confirmedServicePayments = servicePayments.flatMap((activity) => {
+      try {
+        const item = JSON.parse(activity.description) as { amountCents?: number; paymentStatus?: string };
+        return item.paymentStatus === 'paid' && Number.isSafeInteger(item.amountCents) && Number(item.amountCents) > 0
+          ? [{ amountCents: Number(item.amountCents), createdAt: activity.createdAt }] : [];
+      } catch { return []; }
+    });
     return res.json({
       windowDays: 90,
       updatedAt: new Date().toISOString(),
@@ -639,9 +656,12 @@ app.get('/demand/revenue-summary', requireAuth, requireRole(['seller', 'admin'])
       })),
       actualPaidOrderValueCents: paidOrders._sum.totalCents ?? 0,
       actualPaidOrders: paidOrders._count._all,
+      actualPaidServiceValueCents: confirmedServicePayments.reduce((sum, item) => sum + item.amountCents, 0),
+      actualPaidServiceOrders: confirmedServicePayments.length,
+      actualPaidTotalValueCents: (paidOrders._sum.totalCents ?? 0) + confirmedServicePayments.reduce((sum, item) => sum + item.amountCents, 0),
       definitions: {
         inquiries: 'Only buyer inquiries with an email address and recorded permission to follow up.',
-        revenue: 'Only non-demo orders marked PAID after the Stripe webhook confirms payment. Inquiries, quotes, and forecasts are not revenue.',
+        revenue: 'Only non-demo dataset orders and service checkouts recorded PAID by the signed Stripe webhook. Inquiries, quotes, and forecasts are not revenue.',
       },
     });
   } catch (error) {
@@ -1280,7 +1300,7 @@ app.post('/webhooks/stripe', async (req, res) => {
         });
         if (!lead?.email) return res.status(404).json({ error: 'Service buyer record not found.' });
         const inquiry = await prisma.buyerDemandEvent.findFirst({
-          where: { id: inquiryId, contactConsentAt: { not: null }, buyerEmail: lead.email, status: { in: ['NEW', 'CONTACTED'] } },
+          where: { id: inquiryId, contactConsentAt: { not: null }, buyerEmail: lead.email },
         });
         if (!inquiry) return res.status(409).json({ error: 'The original consented buyer inquiry is no longer eligible.' });
         const checkoutEmail = (session.customer_details?.email || session.customer_email || '').toLowerCase();
@@ -1303,6 +1323,10 @@ app.post('/webhooks/stripe', async (req, res) => {
           if (!existingPayment) {
             await prisma.$transaction([
               prisma.lead.update({ where: { id: leadId }, data: { stage: 'WON' } }),
+              prisma.buyerDemandEvent.updateMany({
+                where: { id: inquiryId, contactConsentAt: { not: null } },
+                data: { status: 'PAID' },
+              }),
               prisma.leadActivity.create({
                 data: {
                   leadId, type: 'service_payment_received',
