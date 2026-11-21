@@ -48,6 +48,7 @@ export default function RevenueEnginePage() {
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
   const [servicePrices, setServicePrices] = useState<Record<string, string>>({});
+  const [serviceScopes, setServiceScopes] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setError('');
@@ -93,6 +94,11 @@ export default function RevenueEnginePage() {
 
   const createServiceCheckout = async (inquiry: Inquiry) => {
     const amount = Number(servicePrices[inquiry.id]);
+    const proposalDescription = (serviceScopes[inquiry.id] || '').trim();
+    if (proposalDescription.length < 20) {
+      setError('Describe the deliverables and scope (at least 20 characters) before creating checkout.');
+      return;
+    }
     if (!Number.isFinite(amount) || amount < 5 || amount > 10000) {
       setError('Enter a quote between $5 and $10,000 before creating checkout.');
       return;
@@ -105,7 +111,7 @@ export default function RevenueEnginePage() {
       const response = await fetch(`${API}/pipeline/buyer-inquiries/${inquiry.id}/checkout`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amountCents: Math.round(amount * 100) }),
+        body: JSON.stringify({ amountCents: Math.round(amount * 100), proposalDescription }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'Could not create service checkout.');
@@ -196,6 +202,9 @@ export default function RevenueEnginePage() {
                   {['NEW', 'CONTACTED'].includes(item.status) && <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap', width: '100%', marginTop: 8 }}>
                     <label style={{ color: '#93a4bd', fontSize: 12 }}>Your quote ($)
                       <input type="number" min="5" max="10000" step="0.01" inputMode="decimal" value={servicePrices[item.id] || ''} onChange={event => setServicePrices(current => ({ ...current, [item.id]: event.target.value }))} placeholder="e.g. 99.00" style={{ display: 'block', marginTop: 4, padding: 8, width: 125, borderRadius: 7, border: '1px solid #475569', background: '#0b1220', color: 'white' }} />
+                    </label>
+                    <label style={{ color: '#93a4bd', fontSize: 12, width: '100%' }}>Deliverables and scope shown at checkout
+                      <textarea rows={3} maxLength={1000} value={serviceScopes[item.id] || ''} onChange={event => setServiceScopes(current => ({ ...current, [item.id]: event.target.value }))} placeholder="Describe exactly what the buyer receives, included revisions, and any limits." style={{ display: 'block', boxSizing: 'border-box', width: '100%', marginTop: 4, padding: 9, borderRadius: 7, border: '1px solid #475569', background: '#0b1220', color: 'white' }} />
                     </label>
                     <button disabled={busyId === item.id} onClick={() => void createServiceCheckout(item)} style={{ marginTop: 18, padding: '9px 13px', borderRadius: 7, background: busyId === item.id ? '#475569' : '#2563eb', color: 'white', border: 0, fontWeight: 700 }}>{busyId === item.id ? 'Preparing checkout…' : 'Create Stripe checkout'}</button>
                     <span style={{ color: '#8291a7', fontSize: 11 }}>Buyer pays through Stripe; only confirmed payment counts as revenue.</span>
