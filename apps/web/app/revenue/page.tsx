@@ -22,6 +22,9 @@ type RevenueData = {
   inquiriesByOffer: OfferCount[];
   actualPaidOrderValueCents: number;
   actualPaidOrders: number;
+  actualPaidServiceValueCents?: number;
+  actualPaidServiceOrders?: number;
+  actualPaidTotalValueCents?: number;
   definitions: { inquiries: string; revenue: string };
 };
 
