@@ -1,4 +1,5 @@
 import express from 'express';
+import Stripe from 'stripe';
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
@@ -338,6 +339,134 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       ...(data.stage && data.stage !== lead.stage ? { activities: { create: { type: 'stage_changed', description: `Stage changed to ${data.stage}.` } } } : {}),
     } });
     return res.json({ lead: updated });
+  });
+
+
+  // Turn an explicitly consented buyer inquiry into a one-time, seller-priced Stripe checkout.
+  // The seller chooses the amount; only the Stripe webhook can record the service as paid.
+  router.post('/buyer-inquiries/:id/checkout', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user || (user.role !== 'seller' && user.role !== 'admin')) {
+      return res.status(403).json({ error: 'Seller or administrator access is required.' });
+    }
+    if (process.env.STRIPE_CHECKOUT_ENABLED !== 'true') {
+      return res.status(503).json({ error: 'Service checkout is not enabled.' });
+    }
+    const parsed = z.object({
+      amountCents: z.number().int().min(500).max(1_000_000),
+    }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Enter a service price between $5 and $10,000.' });
+
+    const isPreview = process.env.VERCEL_ENV === 'preview';
+    const secretKey = isPreview ? process.env.STRIPE_SECRET_TEST_KEY : process.env.STRIPE_SECRET_KEY;
+    if (!secretKey || (isPreview && !secretKey.startsWith('sk_test_')) ||
+        (process.env.VERCEL_ENV === 'production' && !secretKey.startsWith('sk_live_'))) {
+      return res.status(503).json({ error: 'A matching Stripe key is not configured for this environment.' });
+    }
+
+    try {
+      const inquiry = await prisma.buyerDemandEvent.findFirst({
+        where: {
+          id: String(req.params.id),
+          contactConsentAt: { not: null },
+          buyerEmail: { not: null },
+          status: { in: ['NEW', 'CONTACTED'] },
+        },
+      });
+      if (!inquiry?.buyerEmail) return res.status(404).json({ error: 'A contactable, open buyer inquiry was not found.' });
+
+      const ownerId = user.id;
+      const sourceKey = `buyer-inquiry:${inquiry.id}:${ownerId}`;
+      const companyName = inquiry.companyName?.trim() || inquiry.buyerName?.trim() || inquiry.buyerEmail;
+      const lead = await prisma.lead.upsert({
+        where: { sourceKey },
+        create: {
+          ownerId, source: 'buyer-inquiry', sourceRecordId: inquiry.id, sourceKey,
+          companyName: companyName.slice(0, 200),
+          contactName: inquiry.buyerName?.slice(0, 160) ?? null,
+          email: inquiry.buyerEmail.toLowerCase(),
+          description: [inquiry.interest ? `Requested service: ${inquiry.interest}` : '', inquiry.message || ''].filter(Boolean).join(' • ').slice(0, 2400),
+          notes: 'Buyer submitted this inquiry and explicitly consented to follow-up. Service checkout is a seller-priced quote; deliverables and timing must be agreed before work begins.',
+          activities: { create: { type: 'buyer_inquiry_imported', description: 'Created from a buyer inquiry with recorded follow-up consent.' } },
+        },
+        update: {},
+      });
+      if (lead.email?.toLowerCase() !== inquiry.buyerEmail.toLowerCase()) {
+        return res.status(409).json({ error: 'The saved buyer lead does not match the consented inquiry email.' });
+      }
+
+      const labels: Record<string, string> = {
+        'supplier-intelligence': 'Supplier intelligence research',
+        'engineering-awards': 'Engineering awards research',
+        'agency-trends': 'Agency and market trends research',
+        'custom-research': 'Custom business research',
+        'weather-planning': 'Weather planning research',
+        'supplier-monitoring': 'Supplier monitoring service',
+        'data-cleaning': 'Customer-authorized data cleaning',
+        'rfp-intelligence': 'RFP and contract intelligence research',
+        'business-reports': 'Industry and business report',
+        'data-api': 'Business data access service',
+        'workflow-automation': 'Business workflow automation service',
+        'white-label-intelligence': 'White-label intelligence report',
+      };
+      const serviceName = labels[inquiry.interest || ''] || 'Custom business research service';
+      const amountCents = parsed.data.amountCents;
+      const stripe = new Stripe(secretKey);
+      const previous = await prisma.leadActivity.findFirst({
+        where: { leadId: lead.id, type: 'service_checkout_created' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (previous) {
+        try {
+          const previousData = JSON.parse(previous.description) as { sessionId?: string; amountCents?: number };
+          if (previousData.sessionId && previousData.amountCents === amountCents) {
+            const existing = await stripe.checkout.sessions.retrieve(previousData.sessionId);
+            if (existing.status === 'open' && existing.url) {
+              return res.json({ checkoutUrl: existing.url, reused: true, amountCents, currency: 'USD' });
+            }
+          }
+        } catch { /* Expired or unavailable session: create a fresh idempotent checkout. */ }
+      }
+
+      const baseUrl = (process.env.FRONTEND_URL || 'https://aidatamarketplacefinal.vercel.app').replace(/\/$/, '');
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer_email: inquiry.buyerEmail.toLowerCase(),
+        client_reference_id: lead.id,
+        line_items: [{
+          quantity: 1,
+          price_data: {
+            currency: 'usd',
+            unit_amount: amountCents,
+            product_data: {
+              name: serviceName.slice(0, 250),
+              description: 'One-time service quote. Scope, delivery schedule, and any required customer-provided materials must be confirmed with the seller before work begins.',
+            },
+          },
+        }],
+        metadata: {
+          kind: 'service_request',
+          leadId: lead.id,
+          sellerId: ownerId,
+          inquiryId: inquiry.id,
+          serviceKey: inquiry.interest || 'custom-research',
+          amountCents: String(amountCents),
+        },
+        success_url: `${baseUrl}/service-checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/for-businesses?checkout=cancelled`,
+      }, { idempotencyKey: `service-checkout-${lead.id}-${amountCents}-${randomUUID()}` });
+      if (!session.url) throw new Error('Stripe did not return a Checkout URL.');
+      await prisma.leadActivity.create({
+        data: {
+          leadId: lead.id, type: 'service_checkout_created',
+          description: JSON.stringify({ sessionId: session.id, amountCents, serviceKey: inquiry.interest || 'custom-research', createdAt: new Date().toISOString() }),
+        },
+      });
+      return res.status(201).json({ checkoutUrl: session.url, amountCents, currency: 'USD', status: 'pending' });
+    } catch (error) {
+      console.error('Service checkout creation failed', error);
+      return res.status(502).json({ error: 'Unable to create service checkout. No payment was confirmed.' });
+    }
   });
 
   router.get('/sales', async (req, res) => {
