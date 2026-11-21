@@ -1,0 +1,172 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+
+const API = process.env.NEXT_PUBLIC_API_URL || '/api';
+
+type Inquiry = {
+  id: string;
+  buyerName: string | null;
+  buyerEmail: string | null;
+  companyName: string | null;
+  interest: string | null;
+  message: string | null;
+  status: string;
+  createdAt: string;
+};
+type OfferCount = { interest: string | null; status: string; count: number };
+type RevenueData = {
+  windowDays: number;
+  updatedAt: string;
+  inquiries: Inquiry[];
+  inquiriesByOffer: OfferCount[];
+  actualPaidOrderValueCents: number;
+  actualPaidOrders: number;
+  definitions: { inquiries: string; revenue: string };
+};
+
+const labels: Record<string, string> = {
+  'supplier-intelligence': 'Supplier intelligence',
+  'engineering-awards': 'Engineering awards research',
+  'agency-trends': 'Agency and competitor trends',
+  'custom-research': 'Custom research',
+  'weather-planning': 'Weather planning',
+  'supplier-monitoring': 'Supplier monitoring',
+  'data-cleaning': 'Data cleaning and enrichment',
+  'rfp-intelligence': 'RFP and contract intelligence',
+  'business-reports': 'Industry and business reports',
+  'data-api': 'Business data API',
+  'workflow-automation': 'Workflow automation',
+  'white-label-intelligence': 'White-label intelligence',
+};
+
+const money = (cents: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
+
+export default function RevenueEnginePage() {
+  const [data, setData] = useState<RevenueData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState('');
+
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('Please sign in with a seller or administrator account.');
+      const response = await fetch(`${API}/demand/revenue-summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Unable to load revenue demand data.');
+      setData(result as RevenueData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load revenue demand data.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const updateStatus = async (id: string, status: 'CONTACTED' | 'CLOSED') => {
+    setBusyId(id);
+    setError('');
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('Please sign in first.');
+      const response = await fetch(`${API}/buyer-inquiries/${id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Unable to update inquiry.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update inquiry.');
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const totals = (data?.inquiriesByOffer || []).reduce<Record<string, number>>((acc, item) => {
+    const key = item.interest || 'unspecified';
+    acc[key] = (acc[key] || 0) + item.count;
+    return acc;
+  }, {});
+
+  return (
+    <main style={{ minHeight: '100vh', padding: '28px 18px', background: '#0b1220', color: '#e5edf8' }}>
+      <div style={{ maxWidth: 1120, margin: '0 auto' }}>
+        <nav style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 28 }}>
+          <a href="/dashboard" style={{ color: '#93c5fd' }}>← Dashboard</a>
+          <a href="/agents" style={{ color: '#93c5fd' }}>AI agents</a>
+          <a href="/pipeline" style={{ color: '#93c5fd' }}>Sales pipeline</a>
+          <a href="/for-businesses" style={{ color: '#93c5fd' }}>Buyer offers page</a>
+        </nav>
+        <p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 12, fontWeight: 700 }}>GROWTH OPERATIONS</p>
+        <h1 style={{ fontSize: 'clamp(30px, 5vw, 42px)', margin: '8px 0' }}>Revenue engine</h1>
+        <p style={{ color: '#a8b6ca', lineHeight: 1.6, maxWidth: 850 }}>Track which services real buyers ask for, follow up with people who explicitly requested contact, and keep actual paid orders separate from demand signals.</p>
+        {error && <p role="alert" style={{ padding: 12, borderRadius: 8, background: '#451a1a', color: '#fecaca' }}>{error}</p>}
+        {loading ? <p style={{ color: '#94a3b8' }}>Loading verified demand and payment records…</p> : data && <>
+          <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 12, margin: '22px 0' }}>
+            <article style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, padding: 18 }}>
+              <div style={{ color: '#93a4bd', fontSize: 12 }}>Stripe-confirmed paid orders</div>
+              <strong style={{ fontSize: 28 }}>{data.actualPaidOrders}</strong>
+            </article>
+            <article style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, padding: 18 }}>
+              <div style={{ color: '#93a4bd', fontSize: 12 }}>Recorded paid order value</div>
+              <strong style={{ fontSize: 28 }}>{money(data.actualPaidOrderValueCents)}</strong>
+            </article>
+            <article style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, padding: 18 }}>
+              <div style={{ color: '#93a4bd', fontSize: 12 }}>Consented buyer inquiries</div>
+              <strong style={{ fontSize: 28 }}>{data.inquiries.length}</strong>
+              <div style={{ color: '#93a4bd', fontSize: 11 }}>Latest 90 days · max 100 shown</div>
+            </article>
+          </section>
+          <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, padding: 18, marginBottom: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <h2 style={{ margin: 0, fontSize: 20 }}>Demand by revenue stream</h2>
+              <span style={{ color: '#93a4bd', fontSize: 12 }}>Updated {new Date(data.updatedAt).toLocaleString()}</span>
+            </div>
+            {Object.keys(totals).length ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 10, marginTop: 16 }}>
+              {Object.entries(totals).sort((a,b) => b[1]-a[1]).map(([key,count]) => (
+                <div key={key} style={{ background: '#17263a', padding: 14, borderRadius: 8 }}>
+                  <div style={{ color: '#cbd5e1', fontSize: 13 }}>{labels[key] || key}</div>
+                  <strong style={{ fontSize: 24 }}>{count}</strong>
+                  <div style={{ color: '#93a4bd', fontSize: 11 }}>Buyer inquiries</div>
+                </div>
+              ))}
+            </div> : <p style={{ color: '#93a4bd' }}>No consented buyer inquiries in the last 90 days yet. The public buyer offers page is ready to collect them.</p>}
+          </section>
+          <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ padding: 16, borderBottom: '1px solid #26364d', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <h2 style={{ margin: 0, fontSize: 20 }}>Buyer requests</h2>
+              <button onClick={() => void load()} style={{ padding: '8px 12px', borderRadius: 7, background: '#1e293b', color: 'white', border: '1px solid #475569' }}>Refresh</button>
+            </div>
+            {data.inquiries.length ? data.inquiries.map(item => (
+              <article key={item.id} style={{ padding: 16, borderBottom: '1px solid #26364d' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div>
+                    <strong>{item.companyName || 'Company not supplied'}</strong>
+                    <div style={{ color: '#cbd5e1', fontSize: 13, marginTop: 4 }}>{item.buyerName || 'Name not supplied'} · {item.buyerEmail}</div>
+                    <div style={{ color: '#93c5fd', fontSize: 12, marginTop: 5 }}>{labels[item.interest || ''] || item.interest || 'Other request'}</div>
+                  </div>
+                  <span style={{ color: item.status === 'NEW' ? '#fbbf24' : '#86efac', fontSize: 12, fontWeight: 700 }}>{item.status}</span>
+                </div>
+                {item.message && <p style={{ color: '#a8b6ca', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{item.message}</p>}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ color: '#8291a7', fontSize: 11 }}>Received {new Date(item.createdAt).toLocaleString()}</span>
+                  {item.status === 'NEW' && <button disabled={busyId === item.id} onClick={() => void updateStatus(item.id, 'CONTACTED')} style={{ padding: '8px 11px', borderRadius: 7, background: '#0f766e', color: 'white', border: 0 }}>Mark contacted</button>}
+                  {item.status !== 'CLOSED' && <button disabled={busyId === item.id} onClick={() => void updateStatus(item.id, 'CLOSED')} style={{ padding: '8px 11px', borderRadius: 7, background: '#334155', color: 'white', border: 0 }}>Close request</button>}
+                </div>
+              </article>
+            )) : <p style={{ padding: 18, color: '#93a4bd' }}>No consented inquiries yet. Share the buyer offers page to test demand.</p>}
+          </section>
+          <p style={{ color: '#8291a7', fontSize: 12, lineHeight: 1.6, marginTop: 16 }}>{data.definitions.inquiries} {data.definitions.revenue}</p>
+        </>}
+      </div>
+    </main>
+  );
+}
