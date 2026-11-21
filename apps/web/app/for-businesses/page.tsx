@@ -114,6 +114,30 @@ export default function ForBusinessesPage() {
         </div>
       </section>
 
+      <section style={{ marginTop: 58 }}>
+        <p style={{ color: '#67e8f9', fontSize: 12, fontWeight: 800, letterSpacing: '.16em' }}>SERVICES WE ARE VALIDATING</p>
+        <h2 style={{ color: '#fff', fontSize: 'clamp(1.8rem, 4vw, 2.5rem)', margin: '8px 0 12px' }}>Practical intelligence and data services for business teams.</h2>
+        <p style={{ color: '#aebdce', lineHeight: 1.65, maxWidth: 820, marginBottom: 22 }}>Tell us which service would solve a real problem for your organization. We are validating demand before promising availability, delivery dates, or fixed pricing.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 16 }}>
+          {[
+            ['Supplier & contract intelligence', 'Research suppliers, federal award history, agency activity, and relevant contract opportunities.'],
+            ['Custom research briefs', 'Commission a focused report on an industry, market, competitor set, or business question.'],
+            ['Supplier monitoring', 'Receive periodic updates on relevant suppliers, market changes, and new public opportunities.'],
+            ['Data cleaning & enrichment', 'Organize, deduplicate, validate, and enrich data that your organization owns or is authorized to process.'],
+            ['Industry reports', 'Get structured market summaries, trends, and source-linked research for business decisions.'],
+            ['Business data API', 'Explore programmatic access to reviewed, licensed marketplace data with usage limits.'],
+            ['RFP research & proposal support', 'Find relevant solicitations and prepare research and draft proposal materials for human review.'],
+            ['Workflow automation', 'Automate recurring research, reporting, and internal business workflows.'],
+          ].map(([title, description]) => (
+            <article key={title} style={{ padding: 22, border: '1px solid rgba(148,163,184,.18)', borderRadius: 14, background: 'rgba(15,23,42,.58)' }}>
+              <h3 style={{ color: '#fff', fontSize: 18, margin: '0 0 10px' }}>{title}</h3>
+              <p style={{ color: '#aebdce', lineHeight: 1.65, margin: '0 0 16px' }}>{description}</p>
+              <a href="#buyer-inquiry" style={{ color: '#67e8f9', fontWeight: 800, textDecoration: 'none' }}>Request information ↓</a>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <BuyerInquiryForm />
 
       <section style={{ marginTop: 58, padding: '28px clamp(20px, 4vw, 42px)', border: '1px solid rgba(20,184,166,.25)', borderRadius: 16, background: 'rgba(13,148,136,.08)' }}>
