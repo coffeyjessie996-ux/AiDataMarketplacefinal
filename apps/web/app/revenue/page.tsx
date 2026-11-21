@@ -52,6 +52,7 @@ export default function RevenueEnginePage() {
   const [busyId, setBusyId] = useState('');
   const [servicePrices, setServicePrices] = useState<Record<string, string>>({});
   const [serviceScopes, setServiceScopes] = useState<Record<string, string>>({});
+  const [checkoutLinks, setCheckoutLinks] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setError('');
@@ -119,7 +120,9 @@ export default function RevenueEnginePage() {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'Could not create service checkout.');
       if (typeof result.checkoutUrl !== 'string') throw new Error('Stripe did not return a checkout link.');
-      window.location.assign(result.checkoutUrl);
+      setCheckoutLinks(current => ({ ...current, [inquiry.id]: result.checkoutUrl }));
+      setError('Stripe checkout link created. Copy it and send it to the buyer who requested this quote. The seller is not being sent to the payment page.');
+      setBusyId('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create service checkout.');
       setBusyId('');
@@ -211,7 +214,13 @@ export default function RevenueEnginePage() {
                       <textarea rows={3} maxLength={1000} value={serviceScopes[item.id] || ''} onChange={event => setServiceScopes(current => ({ ...current, [item.id]: event.target.value }))} placeholder="Describe exactly what the buyer receives, included revisions, and any limits." style={{ display: 'block', boxSizing: 'border-box', width: '100%', marginTop: 4, padding: 9, borderRadius: 7, border: '1px solid #475569', background: '#0b1220', color: 'white' }} />
                     </label>
                     <button disabled={busyId === item.id} onClick={() => void createServiceCheckout(item)} style={{ marginTop: 18, padding: '9px 13px', borderRadius: 7, background: busyId === item.id ? '#475569' : '#2563eb', color: 'white', border: 0, fontWeight: 700 }}>{busyId === item.id ? 'Preparing checkout…' : 'Create Stripe checkout'}</button>
-                    <span style={{ color: '#8291a7', fontSize: 11 }}>Buyer pays through Stripe; only confirmed payment counts as revenue.</span>
+                    <span style={{ color: '#8291a7', fontSize: 11 }}>Buyer pays through Stripe; only confirmed payment counts as revenue. Creating the link does not charge anyone.</span>
+                    {checkoutLinks[item.id] && <div style={{ width: '100%', display: 'grid', gap: 8, marginTop: 8 }}>
+                      <label style={{ color: '#93a4bd', fontSize: 12 }}>Stripe checkout link for this buyer
+                        <input readOnly value={checkoutLinks[item.id]} style={{ display: 'block', boxSizing: 'border-box', width: '100%', marginTop: 4, padding: 9, borderRadius: 7, border: '1px solid #475569', background: '#0b1220', color: 'white' }} />
+                      </label>
+                      <button type="button" onClick={() => { void navigator.clipboard.writeText(checkoutLinks[item.id]).then(() => setError('Checkout link copied. Send it only to the buyer who requested the quote.')).catch(() => setError('Select and copy the checkout link above.')); }} style={{ justifySelf: 'start', padding: '8px 12px', borderRadius: 7, background: '#0f766e', color: 'white', border: 0 }}>Copy buyer checkout link</button>
+                    </div>}
                   </div>}
                 </div>
               </article>
