@@ -428,6 +428,9 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
           const previousData = JSON.parse(previous.description) as { sessionId?: string; amountCents?: number; proposalDescription?: string };
           if (previousData.sessionId) {
             const existing = await stripe.checkout.sessions.retrieve(previousData.sessionId);
+            if (existing.status === 'complete' || existing.payment_status === 'paid') {
+              return res.status(409).json({ error: 'A previous checkout has completed or is awaiting payment confirmation. Refresh the revenue dashboard before creating another quote.' });
+            }
             if (existing.status === 'open' && existing.url &&
                 previousData.amountCents === amountCents &&
                 previousData.proposalDescription === parsed.data.proposalDescription) {
