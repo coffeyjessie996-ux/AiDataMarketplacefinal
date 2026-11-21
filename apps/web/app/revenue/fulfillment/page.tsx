@@ -19,6 +19,7 @@ export default function ServiceFulfillmentPage() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [origin, setOrigin] = useState('');
 
   const load = useCallback(async () => {
     setError('');
@@ -36,7 +37,7 @@ export default function ServiceFulfillmentPage() {
     } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setOrigin(window.location.origin); void load(); }, [load]);
 
   const publish = async (order: ServiceOrder) => {
     const content = (drafts[order.leadId] || '').trim();
@@ -81,7 +82,7 @@ export default function ServiceFulfillmentPage() {
         {loading ? <p style={{ color: '#94a3b8' }}>Loading confirmed payments…</p> :
           orders.length ? <section style={{ display: 'grid', gap: 14 }}>
             {orders.map(order => {
-              const link = links[order.leadId] || (order.deliveryToken ? `${typeof window !== 'undefined' ? window.location.origin : ''}/service-deliveries/${order.deliveryToken}` : '');
+              const link = links[order.leadId] || (order.deliveryToken ? `${origin}/service-deliveries/${order.deliveryToken}` : '');
               return <article key={order.leadId} style={{ padding: 18, border: '1px solid #334155', borderRadius: 12, background: '#101a2b' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div>
