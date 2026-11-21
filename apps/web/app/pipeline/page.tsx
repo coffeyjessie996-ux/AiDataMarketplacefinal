@@ -85,6 +85,18 @@ export default function PipelinePage() {
     finally { setBusy(false); }
   };
 
+  const importBuyerInquiries = async () => {
+    setBusy(true); setMessage(''); setError('');
+    try {
+      const response = await fetch(`${API}/pipeline/leads/import-buyer-inquiries`, { method: 'POST', headers: headers(), body: '{}' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Buyer inquiry import failed.');
+      setMessage(`Reviewed ${data.inquiriesReviewed} consented buyer inquiries; ${data.leadsCreatedOrExisting} leads created or already present. No email was sent.`);
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Buyer inquiry import failed.'); }
+    finally { setBusy(false); }
+  };
+
   const addLead = async (event: React.FormEvent) => {
     event.preventDefault(); setBusy(true); setMessage(''); setError('');
     try {
@@ -177,7 +189,7 @@ export default function PipelinePage() {
       </nav>
       <p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 12, fontWeight: 700 }}>GROWTH OPERATIONS</p>
       <h1 style={{ fontSize: 36, margin: '8px 0' }}>Sales & Opportunity Pipeline</h1>
-      <p style={{ color: '#a8b6ca', lineHeight: 1.6 }}>This pipeline contains supplier research records and saved public work opportunities. A company or job listing is not a confirmed buyer, contract award to you, or earned revenue. Buyer interest is tracked separately through the consent-based buyer inquiry form.</p>
+      <p style={{ color: '#a8b6ca', lineHeight: 1.6 }}>This pipeline combines supplier research with buyer inquiries that explicitly consented to follow-up. Public supplier records and job listings are not confirmed buyers, contract awards to you, or earned revenue.</p>
       <p style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.5 }}>AI-assisted outreach and closing content on this page is draft-only for human review. Nothing is sent automatically.</p>
       <section aria-label="Revenue node" style={{ background: '#101a2b', border: '1px solid #2563eb', borderRadius: 12, padding: 18, margin: '22px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
@@ -205,6 +217,7 @@ export default function PipelinePage() {
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
         <button onClick={importSuppliers} disabled={busy} style={{ padding: '11px 14px', border: 0, borderRadius: 8, background: '#2563eb', color: 'white' }}>Import saved USAspending suppliers</button>
+        <button onClick={importBuyerInquiries} disabled={busy} style={{ padding: '11px 14px', border: 0, borderRadius: 8, background: '#0f766e', color: 'white' }}>Import consented buyer inquiries</button>
         <button onClick={() => void load()} style={{ padding: '11px 14px', border: '1px solid #334155', borderRadius: 8, background: '#172033', color: 'white' }}>Refresh</button>
         <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search company" style={{ flex: '1 1 200px', padding: 11, borderRadius: 8, background: '#111a2b', color: 'white', border: '1px solid #334155' }} />
       </div>
