@@ -134,7 +134,7 @@ export default function RevenueEnginePage() {
         </nav>
         <p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 12, fontWeight: 700 }}>GROWTH OPERATIONS</p>
         <h1 style={{ fontSize: 'clamp(30px, 5vw, 42px)', margin: '8px 0' }}>Revenue engine</h1>
-        <p style={{ color: '#a8b6ca', lineHeight: 1.6, maxWidth: 850 }}>Track which services real buyers ask for, follow up with people who explicitly requested contact, and keep actual paid orders separate from demand signals.</p>
+        <p style={{ color: '#a8b6ca', lineHeight: 1.6, maxWidth: 850 }}>Track which services real buyers ask for, create seller-priced Stripe checkout for consented requests, and separate confirmed payments from demand signals.</p>
         {error && <p role="alert" style={{ padding: 12, borderRadius: 8, background: '#451a1a', color: '#fecaca' }}>{error}</p>}
         {loading ? <p style={{ color: '#94a3b8' }}>Loading verified demand and payment records…</p> : data && <>
           <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 12, margin: '22px 0' }}>
@@ -146,6 +146,11 @@ export default function RevenueEnginePage() {
               <div style={{ color: '#93a4bd', fontSize: 12 }}>Recorded paid order value</div>
               <strong style={{ fontSize: 28 }}>{money(data.actualPaidOrderValueCents + (data.actualPaidServiceValueCents || 0))}</strong>
               <div style={{ color: '#93a4bd', fontSize: 11 }}>Includes Stripe-confirmed service payments</div>
+            </article>
+            <article style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, padding: 18 }}>
+              <div style={{ color: '#93a4bd', fontSize: 12 }}>Stripe-confirmed paid service orders</div>
+              <strong style={{ fontSize: 28 }}>{data.actualPaidServiceOrders || 0}</strong>
+              <div style={{ color: '#93a4bd', fontSize: 11 }}>{money(data.actualPaidServiceValueCents || 0)} service payments</div>
             </article>
             <article style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 10, padding: 18 }}>
               <div style={{ color: '#93a4bd', fontSize: 12 }}>Consented buyer inquiries</div>
