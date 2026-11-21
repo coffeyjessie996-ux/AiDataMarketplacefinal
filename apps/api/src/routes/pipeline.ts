@@ -1,7 +1,7 @@
 import express from 'express';
 import Stripe from 'stripe';
 import { z } from 'zod';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
 
@@ -461,7 +461,7 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
         },
         success_url: `${baseUrl}/service-checkout/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${baseUrl}/for-businesses?checkout=cancelled`,
-      }, { idempotencyKey: `service-checkout-${lead.id}-${amountCents}-${createHash('sha256').update(parsed.data.proposalDescription).digest('hex').slice(0, 16)}` });
+      }, { idempotencyKey: `service-checkout-${lead.id}-${randomUUID()}` });
       if (!session.url) throw new Error('Stripe did not return a Checkout URL.');
       await prisma.leadActivity.create({
         data: {
