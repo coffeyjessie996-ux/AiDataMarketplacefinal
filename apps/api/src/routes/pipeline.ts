@@ -355,8 +355,9 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
     }
     const parsed = z.object({
       amountCents: z.number().int().min(500).max(1_000_000),
+      proposalDescription: z.string().trim().min(20).max(1000),
     }).safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Enter a service price between $5 and $10,000.' });
+    if (!parsed.success) return res.status(400).json({ error: 'Enter a price between $5 and $10,000 and describe the deliverables (at least 20 characters).' });
 
     const isPreview = process.env.VERCEL_ENV === 'preview';
     const secretKey = isPreview ? process.env.STRIPE_SECRET_TEST_KEY : process.env.STRIPE_SECRET_KEY;
@@ -441,7 +442,7 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
             unit_amount: amountCents,
             product_data: {
               name: serviceName.slice(0, 250),
-              description: 'One-time service quote. Scope, delivery schedule, and any required customer-provided materials must be confirmed with the seller before work begins.',
+              description: parsed.data.proposalDescription.slice(0, 500),
             },
           },
         }],
@@ -460,7 +461,7 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       await prisma.leadActivity.create({
         data: {
           leadId: lead.id, type: 'service_checkout_created',
-          description: JSON.stringify({ sessionId: session.id, amountCents, serviceKey: inquiry.interest || 'custom-research', createdAt: new Date().toISOString() }),
+          description: JSON.stringify({ sessionId: session.id, amountCents, serviceKey: inquiry.interest || 'custom-research', proposalDescription: parsed.data.proposalDescription, createdAt: new Date().toISOString() }),
         },
       });
       return res.status(201).json({ checkoutUrl: session.url, amountCents, currency: 'USD', status: 'pending' });
