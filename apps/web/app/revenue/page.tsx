@@ -139,6 +139,7 @@ export default function RevenueEnginePage() {
           <a href="/dashboard" style={{ color: '#93c5fd' }}>← Dashboard</a>
           <a href="/agents" style={{ color: '#93c5fd' }}>AI agents</a>
           <a href="/pipeline" style={{ color: '#93c5fd' }}>Sales pipeline</a>
+          <a href="/revenue/fulfillment" style={{ color: '#93c5fd' }}>Paid service delivery</a>
           <a href="/for-businesses" style={{ color: '#93c5fd' }}>Buyer offers page</a>
         </nav>
         <p style={{ color: '#60a5fa', letterSpacing: 2, fontSize: 12, fontWeight: 700 }}>GROWTH OPERATIONS</p>
