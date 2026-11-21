@@ -520,7 +520,7 @@ const buyerInquirySchema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.string().trim().email().max(254),
   company: z.string().trim().min(2).max(160),
-  interest: z.enum(['supplier-intelligence', 'engineering-awards', 'agency-trends', 'custom-research', 'weather-planning']),
+  interest: z.enum(['supplier-intelligence', 'engineering-awards', 'agency-trends', 'custom-research', 'weather-planning', 'supplier-monitoring', 'data-cleaning', 'rfp-intelligence', 'business-reports', 'data-api', 'workflow-automation', 'white-label-intelligence']),
   budgetRange: z.enum(['under-25', '25-49', '50-99', '100-249', '250-plus', 'not-sure']).optional().default('not-sure'),
   message: z.string().trim().max(1500).optional().default(''),
   consent: z.literal(true),
@@ -542,13 +542,13 @@ app.post('/buyer-inquiries', async (req, res) => {
     await prisma.buyerDemandEvent.create({
       data: {
         query: 'buyer_inquiry',
-        category: parsed.data.interest === 'weather-planning' ? 'weather-planning' : 'government-contracting',
+        category: parsed.data.interest,
         resultCount: 0,
         buyerName: parsed.data.name,
         buyerEmail: email,
         companyName: parsed.data.company,
         interest: parsed.data.interest,
-        message: [parsed.data.message, parsed.data.interest === 'weather-planning' ? `Monthly budget interest: ${parsed.data.budgetRange}` : ''].filter(Boolean).join('\n\n') || null,
+        message: [parsed.data.message, `Budget range: ${parsed.data.budgetRange}`].filter(Boolean).join('\n\n') || null,
         status: 'NEW',
         contactConsentAt: new Date(),
       },
@@ -597,6 +597,59 @@ app.patch('/buyer-inquiries/:id', requireAuth, requireRole(['seller', 'admin']),
 
 // Aggregate real marketplace search activity. Search phrases are collected without IPs,
 // contact details, account IDs, or browser fingerprints.
+app.get('/demand/revenue-summary', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
+  try {
+    const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const inquiryWhere = {
+      status: { in: ['NEW', 'CONTACTED', 'CLOSED'] },
+      buyerEmail: { not: null },
+      contactConsentAt: { not: null },
+      createdAt: { gte: since },
+    };
+    const [inquiries, byOffer, paidOrders] = await Promise.all([
+      prisma.buyerDemandEvent.findMany({
+        where: inquiryWhere,
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+          id: true, buyerName: true, buyerEmail: true, companyName: true,
+          interest: true, message: true, status: true, createdAt: true,
+        },
+      }),
+      prisma.buyerDemandEvent.groupBy({
+        by: ['interest', 'status'],
+        where: inquiryWhere,
+        _count: { _all: true },
+        orderBy: { _count: { interest: 'desc' } },
+      }),
+      prisma.order.aggregate({
+        where: { status: 'PAID', ...nonDemoPaidOrderFilter },
+        _sum: { totalCents: true },
+        _count: { _all: true },
+      }),
+    ]);
+    return res.json({
+      windowDays: 90,
+      updatedAt: new Date().toISOString(),
+      inquiries,
+      inquiriesByOffer: byOffer.map((item) => ({
+        interest: item.interest,
+        status: item.status,
+        count: item._count._all,
+      })),
+      actualPaidOrderValueCents: paidOrders._sum.totalCents ?? 0,
+      actualPaidOrders: paidOrders._count._all,
+      definitions: {
+        inquiries: 'Only buyer inquiries with an email address and recorded permission to follow up.',
+        revenue: 'Only non-demo orders marked PAID after the Stripe webhook confirms payment. Inquiries, quotes, and forecasts are not revenue.',
+      },
+    });
+  } catch (error) {
+    console.error('Revenue demand summary failed', error);
+    return res.status(500).json({ error: 'Unable to load revenue demand summary.' });
+  }
+});
+
 app.get('/demand/summary', requireAuth, requireRole(['seller', 'admin']), async (_req, res) => {
   try {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
