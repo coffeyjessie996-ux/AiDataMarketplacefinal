@@ -134,6 +134,47 @@ export function createPipelineRouter(prisma: PrismaClient, auth: express.Request
       note: 'Priority reflects public-record completeness and contactability, not supplier verification or predicted conversion. Records without an email, website, or named contact are capped at 59.' });
   });
 
+  // Import only buyer inquiries where the visitor explicitly consented to follow-up.
+  // Supplier records and anonymous searches are not treated as buyer prospects.
+  router.post('/leads/import-buyer-inquiries', async (req, res) => {
+    const user = (req as AuthReq).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    try {
+      const inquiries = await prisma.buyerDemandEvent.findMany({
+        where: { contactConsentAt: { not: null }, buyerEmail: { not: null }, status: { in: ['NEW', 'CONTACTED'] } },
+        orderBy: { createdAt: 'desc' }, take: 300,
+      });
+      let imported = 0;
+      for (const inquiry of inquiries) {
+        const email = inquiry.buyerEmail?.trim().toLowerCase();
+        if (!email || !email.includes('@')) continue;
+        const companyName = inquiry.companyName?.trim() || inquiry.buyerName?.trim() || email;
+        const description = [
+          inquiry.interest ? `Buyer-requested interest: ${inquiry.interest}` : '',
+          inquiry.message ? `Buyer message: ${inquiry.message.slice(0, 1800)}` : '',
+          'This contact submitted a marketplace inquiry and consented to follow-up.',
+        ].filter(Boolean).join(' • ').slice(0, 2500);
+        const sourceKey = `buyer-inquiry:${inquiry.id}:${user.id}`;
+        const priority = calculateLeadPriority({ companyName, source: 'buyer-inquiry', description, contactName: inquiry.buyerName, email });
+        await prisma.lead.upsert({
+          where: { sourceKey },
+          create: {
+            id: randomUUID(), ownerId: user.id, source: 'buyer-inquiry', sourceRecordId: inquiry.id,
+            sourceKey, companyName: companyName.slice(0, 200), contactName: inquiry.buyerName?.slice(0, 160) ?? null,
+            email, description, score: priority.score,
+            activities: { create: { type: 'buyer_inquiry_imported', description: 'Imported from a buyer inquiry with recorded follow-up consent.' } },
+          },
+          update: { companyName: companyName.slice(0, 200), contactName: inquiry.buyerName?.slice(0, 160) ?? null, email, description, score: priority.score },
+        });
+        imported++;
+      }
+      return res.json({ source: 'consented buyer inquiries', inquiriesReviewed: inquiries.length, leadsCreatedOrExisting: imported, note: 'Only inquiries with a recorded contact-consent timestamp and email are imported. No email is sent automatically.' });
+    } catch (error) {
+      console.error('Consented buyer inquiry import failed', error);
+      return res.status(500).json({ error: 'Unable to import consented buyer inquiries.' });
+    }
+  });
+
   // AI sales assistant: create an evidence-based outreach draft for human review.
   // It never sends email or changes a lead's stage automatically.
   router.post('/leads/:id/ai-draft', async (req, res) => {
