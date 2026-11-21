@@ -597,6 +597,38 @@ app.patch('/buyer-inquiries/:id', requireAuth, requireRole(['seller', 'admin']),
 
 // Aggregate real marketplace search activity. Search phrases are collected without IPs,
 // contact details, account IDs, or browser fingerprints.
+
+app.get('/service-deliveries/:token', async (req, res) => {
+  const token = String(req.params.token || '');
+  if (!/^[0-9a-f-]{36}$/i.test(token)) return res.status(404).json({ error: 'Delivery not found.' });
+  try {
+    const delivery = await prisma.leadActivity.findFirst({
+      where: { type: 'service_deliverable_ready', description: { contains: token } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!delivery) return res.status(404).json({ error: 'Delivery is not available yet.' });
+    const payload = JSON.parse(delivery.description) as { deliveryToken?: string; content?: string; serviceKey?: string; deliveredAt?: string };
+    if (payload.deliveryToken !== token || typeof payload.content !== 'string') {
+      return res.status(404).json({ error: 'Delivery not found.' });
+    }
+    const paymentActivity = await prisma.leadActivity.findFirst({
+      where: { leadId: delivery.leadId, type: 'service_payment_received', description: { contains: token } },
+      select: { id: true, description: true },
+    });
+    if (!paymentActivity) return res.status(404).json({ error: 'Delivery not found.' });
+    const payment = JSON.parse(paymentActivity.description) as { paymentStatus?: string; deliveryToken?: string };
+    if (payment.paymentStatus !== 'paid' || payment.deliveryToken !== token) {
+      return res.status(404).json({ error: 'Delivery not found.' });
+    }
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    return res.json({ content: payload.content, serviceKey: payload.serviceKey || 'custom-research', deliveredAt: payload.deliveredAt });
+  } catch (error) {
+    console.error('Secure service delivery lookup failed', error);
+    return res.status(500).json({ error: 'Unable to load this delivery.' });
+  }
+});
+
 app.get('/demand/revenue-summary', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
   try {
     const user = (req as express.Request & { user?: User }).user;
@@ -1334,7 +1366,7 @@ app.post('/webhooks/stripe', async (req, res) => {
                   description: JSON.stringify({
                     marker: activityMarker, sessionId: session.id, amountCents: expectedAmount,
                     currency: 'USD', serviceKey: session.metadata.serviceKey || 'custom-research',
-                    paymentStatus: 'paid', confirmedAt: new Date().toISOString(),
+                    paymentStatus: 'paid', deliveryToken: randomUUID(), confirmedAt: new Date().toISOString(),
                   }),
                 },
               }),
