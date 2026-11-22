@@ -216,7 +216,7 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
 
     const since30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const prior = await prisma.outboundEmail.findFirst({
-      where: { recipient, status: 'SENT', sentAt: { gte: since30Days } },
+      where: { recipient, OR: [{ status: 'SENDING' }, { status: 'SENT', sentAt: { gte: since30Days } }] },
       select: { id: true },
     });
     if (prior) return res.status(409).json({ error: 'A message was already sent to this address within the last 30 days.' });
