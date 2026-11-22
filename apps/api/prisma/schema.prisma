@@ -27,6 +27,7 @@ model User {
   gmailConnection GmailConnection?
   gmailOAuthStates GmailOAuthState[]
   outboundEmails OutboundEmail[]
+  emailSendQuotas EmailSendQuota[]
 }
 
 model WalletAccount {
@@ -378,4 +379,17 @@ model EmailSuppression {
   reason    String   @default("UNSUBSCRIBED")
   source    String   @default("unsubscribe_link")
   createdAt DateTime @default(now())
+}
+
+
+model EmailSendQuota {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userDayKey  String   @unique
+  day         DateTime
+  sendCount   Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, day])
 }
