@@ -285,7 +285,7 @@ export default function PipelinePage() {
             <input type="checkbox" checked={sendApproval} onChange={e => setSendApproval(e.target.checked)} />
             I reviewed this exact message, independently verified the recipient's business email and relevance, and confirm this is not a public job or government solicitation contact.
           </label>
-          <p style={{ color: '#94a3b8', fontSize: 12 }}>One recipient at a time; maximum 5 per day and one message per address every 30 days. The sender's physical business address and unsubscribe footer are mandatory. Opt-outs are suppressed.</p>
+          <p style={{ color: '#94a3b8', fontSize: 12 }}>One recipient at a time; maximum 5 send attempts per day and one message per address every 30 days. The sender's physical business address and unsubscribe footer are mandatory. Opt-outs are suppressed.</p>
           <button onClick={() => void sendDraftEmail()} disabled={!gmailStatus.connected || !sendApproval || sendBusy || !leads.find(l => l.id === draftLead)?.email} style={{ marginTop: 8, padding: '9px 12px', background: '#1d4ed8', color: 'white', border: 0, borderRadius: 6, opacity: (!gmailStatus.connected || !sendApproval || sendBusy) ? 0.5 : 1 }}>{sendBusy ? 'Sending…' : 'Send approved email'}</button>
           {!gmailStatus.connected && <span style={{ marginLeft: 8, color: '#fbbf24', fontSize: 12 }}>Connect Gmail first.</span>}
         </div>}
