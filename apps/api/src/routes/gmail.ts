@@ -180,8 +180,9 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
       return res.status(503).json({ error: 'Email sending is not enabled in Production yet.' });
     }
     const postalAddress = process.env.MAIL_POSTAL_ADDRESS?.trim();
-    if (!postalAddress || postalAddress.length < 8) {
-      return res.status(503).json({ error: 'Add the business physical mailing address as MAIL_POSTAL_ADDRESS before sending.' });
+    const senderName = process.env.MAIL_SENDER_NAME?.trim();
+    if (!postalAddress || postalAddress.length < 8 || !senderName || senderName.length < 2) {
+      return res.status(503).json({ error: 'Add the business name as MAIL_SENDER_NAME and physical mailing address as MAIL_POSTAL_ADDRESS before sending.' });
     }
     const settings = config();
     if (!settings) return res.status(503).json({ error: 'Gmail OAuth configuration is incomplete.' });
@@ -265,7 +266,7 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
       const footer = [
         '',
         '---',
-        'This is a business inquiry from ' + settings.senderEmail + '.',
+        'This is a business inquiry from ' + senderName + ' (' + settings.senderEmail + ').',
         'Business mailing address: ' + postalAddress,
         'To stop receiving business emails, unsubscribe here: ' + unsubscribeUrl,
       ].join('\\n');
