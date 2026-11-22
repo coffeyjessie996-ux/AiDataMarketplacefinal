@@ -45,6 +45,8 @@ export default function PipelinePage() {
   const [closeBusy, setCloseBusy] = useState('');
   const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; senderEmail: string | null }>({ connected: false, senderEmail: null });
   const [gmailBusy, setGmailBusy] = useState(false);
+  const [sendApproval, setSendApproval] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
 
   const headers = () => {
     const token = localStorage.getItem('auth_token');
@@ -134,6 +136,30 @@ export default function PipelinePage() {
     finally { setDraftBusy(''); }
   };
 
+
+  const sendDraftEmail = async () => {
+    const lead = leads.find(item => item.id === draftLead);
+    if (!draft || !lead || !sendApproval || !gmailStatus.connected) return;
+    setSendBusy(true); setError(''); setMessage('');
+    try {
+      const response = await fetch(API + '/gmail/send', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          leadId: lead.id, subject: draft.subject, body: draft.emailBody,
+          approved: true, contactVerified: true, idempotencyKey: crypto.randomUUID(),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Email could not be sent.');
+      setDraft(prev => prev ? { ...prev, sendStatus: 'SENT' } : prev);
+      setSendApproval(false);
+      setMessage('Email sent to ' + data.recipient + '. The send was recorded in the lead activity.');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Email could not be sent.');
+    } finally { setSendBusy(false); }
+  };
 
   const createClosePlan = async (lead: Lead) => {
     setCloseBusy(lead.id); setClosePlan(null); setClosePlanLead(''); setError(''); setMessage('');
@@ -253,8 +279,17 @@ export default function PipelinePage() {
         {draft.rationale && <p style={{ color: '#b8c6d9', fontSize: 13 }}>Why this approach: {draft.rationale}</p>}
         {draft.missingInformation.length > 0 && <p style={{ color: '#fbbf24', fontSize: 13 }}>Verify before sending: {draft.missingInformation.join('; ')}</p>}
         <p style={{ color: '#93c5fd', fontSize: 13 }}>Next step: {draft.suggestedNextStep}</p>
-        <button onClick={() => { void navigator.clipboard.writeText(`Subject: ${draft.subject}\n\n${draft.emailBody}`); }} style={{ padding: '9px 12px', background: '#0f766e', color: 'white', border: 0, borderRadius: 6 }}>Copy draft</button>
-        <button onClick={() => setDraft(null)} style={{ padding: '9px 12px', marginLeft: 8, background: '#334155', color: 'white', border: 0, borderRadius: 6 }}>Close</button>
+        <button onClick={() => { void navigator.clipboard.writeText(`Subject: ${draft.subject}\\n\\n${draft.emailBody}`); }} style={{ padding: '9px 12px', background: '#0f766e', color: 'white', border: 0, borderRadius: 6 }}>Copy draft</button>
+        {draft.sendStatus !== 'SENT' && <div style={{ marginTop: 14, padding: 12, border: '1px solid #475569', borderRadius: 8 }}>
+          <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', fontSize: 13, lineHeight: 1.5 }}>
+            <input type="checkbox" checked={sendApproval} onChange={e => setSendApproval(e.target.checked)} />
+            I reviewed this exact message, independently verified the recipient's business email and relevance, and confirm this is not a public job or government solicitation contact.
+          </label>
+          <p style={{ color: '#94a3b8', fontSize: 12 }}>One recipient at a time; maximum 5 per day and one message per address every 30 days. The sender's physical business address and unsubscribe footer are mandatory. Opt-outs are suppressed.</p>
+          <button onClick={() => void sendDraftEmail()} disabled={!gmailStatus.connected || !sendApproval || sendBusy || !leads.find(l => l.id === draftLead)?.email} style={{ marginTop: 8, padding: '9px 12px', background: '#1d4ed8', color: 'white', border: 0, borderRadius: 6, opacity: (!gmailStatus.connected || !sendApproval || sendBusy) ? 0.5 : 1 }}>{sendBusy ? 'Sending…' : 'Send approved email'}</button>
+          {!gmailStatus.connected && <span style={{ marginLeft: 8, color: '#fbbf24', fontSize: 12 }}>Connect Gmail first.</span>}
+        </div>}
+        <button onClick={() => { setDraft(null); setSendApproval(false); }} style={{ padding: '9px 12px', marginLeft: 8, background: '#334155', color: 'white', border: 0, borderRadius: 6 }}>Close</button>
       </section>}
 
       {closePlan && <section aria-label="AI deal close plan" style={{ background: '#182638', border: '1px solid #0f766e', borderRadius: 10, padding: 16, margin: '14px 0' }}>
