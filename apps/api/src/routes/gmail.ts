@@ -208,7 +208,7 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
       return res.status(409).json({ error: 'Public job listings and government solicitations cannot be contacted through sales outreach.' });
     }
     const recipient = lead.email?.trim().toLowerCase() || '';
-    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(recipient) || recipient === settings.senderEmail) {
+    if (recipient.length > 254 || !/^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+$/i.test(recipient) || recipient === settings.senderEmail) {
       return res.status(400).json({ error: 'This lead does not have an eligible business email address.' });
     }
     const suppressed = await prisma.emailSuppression.findUnique({ where: { email: recipient } });
@@ -280,7 +280,7 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
       ].join('\\n');
       const fullBody = body + footer;
       const mime = [
-        'From: ' + settings.senderEmail,
+        'From: ' + safeHeader(senderName) + ' <' + settings.senderEmail + '>',
         'To: ' + recipient,
         'Subject: ' + safeHeader(subject),
         'MIME-Version: 1.0',
