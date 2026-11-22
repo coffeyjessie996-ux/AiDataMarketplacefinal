@@ -220,11 +220,19 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
       select: { id: true },
     });
     if (prior) return res.status(409).json({ error: 'A message was already sent to this address within the last 30 days.' });
-    const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
-    const sentToday = await prisma.outboundEmail.count({
-      where: { userId: user.id, status: 'SENT', sentAt: { gte: dayStart } },
+    const now = new Date();
+    const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const userDayKey = user.id + ':' + dayStart.toISOString().slice(0, 10);
+    await prisma.emailSendQuota.upsert({
+      where: { userDayKey },
+      create: { userId: user.id, userDayKey, day: dayStart, sendCount: 0 },
+      update: {},
     });
-    if (sentToday >= 5) return res.status(429).json({ error: 'Daily sending limit reached (5 messages per account).' });
+    const quota = await prisma.emailSendQuota.updateMany({
+      where: { userDayKey, sendCount: { lt: 5 } },
+      data: { sendCount: { increment: 1 } },
+    });
+    if (quota.count !== 1) return res.status(429).json({ error: 'Daily sending limit reached (5 send attempts per account).' });
 
     const connection = await prisma.gmailConnection.findUnique({ where: { userId: user.id } });
     if (!connection || connection.senderEmail.toLowerCase() !== settings.senderEmail ||
