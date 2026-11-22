@@ -27,3 +27,7 @@ CREATE UNIQUE INDEX "GmailOAuthState_stateHash_key" ON "GmailOAuthState"("stateH
 CREATE INDEX "GmailOAuthState_userId_expiresAt_idx" ON "GmailOAuthState"("userId", "expiresAt");
 ALTER TABLE "GmailOAuthState" ADD CONSTRAINT "GmailOAuthState_userId_fkey"
   FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- These records are accessed only by the authenticated API server; block direct Data API access.
+ALTER TABLE "GmailConnection" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "GmailOAuthState" ENABLE ROW LEVEL SECURITY;
