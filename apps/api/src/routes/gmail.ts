@@ -44,11 +44,11 @@ function decryptToken(encrypted: { encryptedRefreshToken: string; tokenIv: strin
 }
 
 function base64Url(input: Buffer | string) {
-  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');
+  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 function safeHeader(value: string) {
-  return value.replace(/[\\r\\n]+/g, ' ').trim();
+  return value.replace(/[\r\n]+/g, ' ').trim();
 }
 
 export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHandler) {
