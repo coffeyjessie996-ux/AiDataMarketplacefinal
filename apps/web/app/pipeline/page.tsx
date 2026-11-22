@@ -125,7 +125,7 @@ export default function PipelinePage() {
   };
 
   const createAiDraft = async (lead: Lead) => {
-    setDraftBusy(lead.id); setDraft(null); setDraftLead(''); setError(''); setMessage('');
+    setDraftBusy(lead.id); setDraft(null); setDraftLead(''); setSendApproval(false); setError(''); setMessage('');
     try {
       const response = await fetch(`${API}/pipeline/leads/${lead.id}/ai-draft`, { method: 'POST', headers: headers(), body: '{}' });
       const data = await response.json();
@@ -273,7 +273,7 @@ export default function PipelinePage() {
       {message && <p role="status" style={{ color: '#bbf7d0' }}>{message}</p>}
       {error && <p role="alert" style={{ color: '#fecaca' }}>{error}</p>}
       {draft && <section aria-label="AI sales draft" style={{ background: '#142238', border: '1px solid #2563eb', borderRadius: 10, padding: 16, margin: '14px 0' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}><strong>AI sales draft · {leads.find(l => l.id === draftLead)?.companyName || 'Lead'}</strong><span style={{ color: '#fbbf24', fontSize: 12 }}>DRAFT ONLY · NOT SENT</span></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}><strong>AI sales draft · {leads.find(l => l.id === draftLead)?.companyName || 'Lead'}</strong><span style={{ color: draft.sendStatus === 'SENT' ? '#86efac' : '#fbbf24', fontSize: 12 }}>{draft.sendStatus === 'SENT' ? 'SENT' : 'DRAFT ONLY · NOT SENT'}</span></div>
         <p style={{ marginBottom: 6, color: '#9fb0c7', fontSize: 12 }}>Subject</p><p>{draft.subject}</p>
         <p style={{ marginBottom: 6, color: '#9fb0c7', fontSize: 12 }}>Email draft</p><pre style={{ whiteSpace: 'pre-wrap', font: 'inherit', lineHeight: 1.5 }}>{draft.emailBody}</pre>
         {draft.rationale && <p style={{ color: '#b8c6d9', fontSize: 13 }}>Why this approach: {draft.rationale}</p>}
