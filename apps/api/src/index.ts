@@ -19,6 +19,7 @@ import { createAgentsRouter } from './routes/agents';
 import { createAiResearchAgentRouter } from './routes/ai-research-agent';
 import { createOperationsRouter } from './routes/operations';
 import { createAuctionsRouter } from './routes/auctions';
+import { createGmailRouter } from './routes/gmail';
 import { finishAgentTask, startAgentTask } from './services/agent-activity';
 import { upsertResearchRecordPreservingAnalysis } from './services/research-records';
 import { isApprovedNwsForecastRecord, isCommercialReuseApproved } from './services/source-rights';
@@ -216,6 +217,7 @@ app.use('/data-bank', createDataBankRouter(prisma, requireAuth));
 app.use('/agents', createAgentsRouter(prisma, requireAuth));
 app.use('/operations', createOperationsRouter(prisma, requireAuth));
 app.use('/auctions', createAuctionsRouter(prisma, requireAuth));
+app.use('/gmail', createGmailRouter(prisma, requireAuth));
 
 const registerSchema = z.object({
   name: z.string().min(2),
