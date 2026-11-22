@@ -9,8 +9,10 @@ const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
 const REQUIRED_SCOPES = ['openid', 'email', 'https://www.googleapis.com/auth/gmail.send'];
 
 function config() {
-  const clientId = process.env.GMAIL_OAUTH_CLIENT_ID;
-  const clientSecret = process.env.GMAIL_OAUTH_CLIENT_SECRET;
+  // Reuse the OAuth client credentials already configured in Production; keep the
+  // Gmail-specific names available as overrides for future environments.
+  const clientId = process.env.GMAIL_OAUTH_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GMAIL_OAUTH_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
   const redirectUri = process.env.GMAIL_REDIRECT_URI;
   const senderEmail = process.env.GMAIL_SENDER_EMAIL?.toLowerCase();
   const key = process.env.GMAIL_TOKEN_ENCRYPTION_KEY;
