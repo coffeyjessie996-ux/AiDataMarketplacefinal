@@ -340,7 +340,18 @@ export function createGmailRouter(prisma: PrismaClient, auth: express.RequestHan
     });
     return res.status(200).send('You have been unsubscribed from future business emails.');
   };
-  router.get('/unsubscribe/:token', unsubscribe);
+  // GET displays a confirmation page so security scanners that prefetch links do not unsubscribe recipients.
+  router.get('/unsubscribe/:token', async (req, res) => {
+    const token = typeof req.params.token === 'string' ? req.params.token : '';
+    if (!/^[a-f0-9]{64}$/.test(token)) return res.status(404).send('Unsubscribe link not found.');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const exists = await prisma.outboundEmail.findUnique({
+      where: { unsubscribeTokenHash: tokenHash }, select: { id: true },
+    });
+    if (!exists) return res.status(404).send('Unsubscribe link not found.');
+    const action = '/api/gmail/unsubscribe/' + token;
+    return res.type('html').send('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribe</title></head><body style="font-family:system-ui;max-width:560px;margin:48px auto;padding:20px"><h1>Unsubscribe from business emails</h1><p>Confirm below to stop future business emails to this address.</p><form method="post" action="' + action + '"><button type="submit" style="padding:12px 18px">Confirm unsubscribe</button></form></body></html>');
+  });
   router.post('/unsubscribe/:token', unsubscribe);
 
   return router;
