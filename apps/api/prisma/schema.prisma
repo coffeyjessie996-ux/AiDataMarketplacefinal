@@ -26,6 +26,8 @@ model User {
   auctionBids  AuctionBid[]
   gmailConnection GmailConnection?
   gmailOAuthStates GmailOAuthState[]
+  outboundEmails OutboundEmail[]
+  emailSendQuotas EmailSendQuota[]
 }
 
 model WalletAccount {
@@ -190,6 +192,7 @@ model Lead {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   activities      LeadActivity[]
+  outboundEmails  OutboundEmail[]
 
   @@index([ownerId, stage])
   @@index([score])
@@ -345,4 +348,48 @@ model GmailOAuthState {
   createdAt DateTime @default(now())
 
   @@index([userId, expiresAt])
+}
+
+
+model OutboundEmail {
+  id                    String   @id @default(cuid())
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leadId                String
+  lead                  Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  recipient             String
+  subject               String
+  body                  String
+  status                String   @default("SENDING")
+  idempotencyKey        String   @unique
+  recipientDayKey       String   @unique
+  unsubscribeTokenHash  String   @unique
+  gmailMessageId        String?
+  failureReason         String?
+  sentAt                DateTime?
+  createdAt             DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([recipient, createdAt])
+}
+
+model EmailSuppression {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  reason    String   @default("UNSUBSCRIBED")
+  source    String   @default("unsubscribe_link")
+  createdAt DateTime @default(now())
+}
+
+
+model EmailSendQuota {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userDayKey  String   @unique
+  day         DateTime
+  sendCount   Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, day])
 }
