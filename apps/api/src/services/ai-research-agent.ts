@@ -116,6 +116,7 @@ export async function analyzePublicResearchRecord(
 
   // Prefer OpenAI while available. Once quota is exhausted, skip it for the rest
   // of this batch and use Gemini instead of abandoning AI enrichment.
+  let openAiQuotaExceeded = false;
   if (openAiKey && !options.skipOpenAi) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -141,6 +142,7 @@ export async function analyzePublicResearchRecord(
     if (response.status !== 429 && !/insufficient_quota|no credits remaining/i.test(errorBody)) {
       throw new Error(`OpenAI returned HTTP ${response.status}: ${errorBody.slice(0, 250)}`);
     }
+    openAiQuotaExceeded = true;
   }
 
   if (geminiKey) {
@@ -158,16 +160,16 @@ export async function analyzePublicResearchRecord(
       });
       if (response.ok) {
         const analysis = parseAnalysis(extractGeminiText(await response.json()));
-        return { analysis, analysisMethod: 'gemini', fallbackReason: openAiKey ? 'provider_quota' : 'missing_api_key' };
+        return { analysis, analysisMethod: 'gemini', fallbackReason: openAiQuotaExceeded ? 'provider_quota' : openAiKey ? 'provider_unavailable' : 'missing_api_key' };
       }
       // Do not leak provider response bodies or credentials into task logs.
       return {
         analysis: deterministicAnalysis(),
         analysisMethod: 'rules_fallback',
-        fallbackReason: response.status === 429 ? 'provider_quota' : 'provider_unavailable',
+        fallbackReason: openAiQuotaExceeded || response.status === 429 ? 'provider_quota' : 'provider_unavailable',
       };
     } catch {
-      return { analysis: deterministicAnalysis(), analysisMethod: 'rules_fallback', fallbackReason: 'provider_unavailable' };
+      return { analysis: deterministicAnalysis(), analysisMethod: 'rules_fallback', fallbackReason: openAiQuotaExceeded ? 'provider_quota' : 'provider_unavailable' };
     }
   }
 
