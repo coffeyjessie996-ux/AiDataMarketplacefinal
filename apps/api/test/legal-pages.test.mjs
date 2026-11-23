@@ -22,5 +22,5 @@ test('seller and buyer terms preserve source rights and payment verification saf
   assert.match(terms, /receives and verifies the provider's payment confirmation/);
   assert.match(terms, /human review and authorization/);
   assert.match(privacy, /Stripe/);
-  assert.match(privacy, /Gmail connection tokens/);
+  assert.match(privacy, /connection tokens in encrypted form/);
 });
