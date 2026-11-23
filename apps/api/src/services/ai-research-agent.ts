@@ -35,6 +35,7 @@ export async function analyzePublicResearchRecord(
     sourceUrl: string;
     payload: unknown;
   },
+  options: { forceRulesFallback?: boolean } = {},
 ): Promise<AiResearchResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   const sourcePayload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
@@ -69,8 +70,12 @@ export async function analyzePublicResearchRecord(
         : 'Review the original public source and independently verify current supplier details before outreach.',
     };
   };
-  if (!apiKey) {
-    return { analysis: deterministicAnalysis(), analysisMethod: 'rules_fallback', fallbackReason: 'missing_api_key' };
+  if (!apiKey || options.forceRulesFallback) {
+    return {
+      analysis: deterministicAnalysis(),
+      analysisMethod: 'rules_fallback',
+      fallbackReason: !apiKey ? 'missing_api_key' : 'provider_quota',
+    };
   }
 
   // Send only public source fields and cap the payload size to control cost.
