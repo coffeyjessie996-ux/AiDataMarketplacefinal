@@ -99,7 +99,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
             awardAmount: record.awardAmount?.toString() ?? null,
             sourceUrl: record.sourceUrl,
             payload: record.payload,
-          }, { forceRulesFallback: blockedByQuota });
+          }, { skipOpenAi: blockedByQuota });
           if (researchResult.fallbackReason === 'provider_quota') blockedByQuota = true;
           const analysisMetadata = {
             ...researchResult.analysis,
@@ -107,10 +107,14 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
             ...(researchResult.fallbackReason ? { fallbackReason: researchResult.fallbackReason } : {}),
             analysisType: researchResult.analysisMethod === 'openai'
               ? 'OpenAI-assisted public-record triage - not supplier verification'
-              : 'Rules-based no-cost public-record triage - not supplier verification',
+              : researchResult.analysisMethod === 'gemini'
+                ? 'Gemini-assisted public-record triage - not supplier verification'
+                : 'Rules-based no-cost public-record triage - not supplier verification',
             model: researchResult.analysisMethod === 'openai'
               ? (process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini')
-              : 'deterministic-rules-v1',
+              : researchResult.analysisMethod === 'gemini'
+                ? (process.env.GEMINI_RESEARCH_MODEL || 'gemini-2.5-flash-lite')
+                : 'deterministic-rules-v1',
             generatedAt: new Date().toISOString(),
           };
 
@@ -155,7 +159,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       const status = processed > 0 && failed === processed ? 'FAILED' : 'COMPLETED';
       await finishAgentTask(prisma, taskId, status, {
         message: pending.length
-          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${blockedByQuota ? 'OpenAI quota is exhausted; remaining records used the no-cost rules fallback. ' : ''}${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum ${MAX_RECORDS_PER_RUN} records are processed per run.`
+          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${blockedByQuota ? 'OpenAI quota is exhausted; remaining records used the Gemini backup when configured, otherwise the no-cost rules fallback. ' : ''}${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum ${MAX_RECORDS_PER_RUN} records are processed per run.`
           : 'AI research run found no unanalyzed records.',
         recordsFetched: processed,
         recordsSaved: saved,
