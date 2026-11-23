@@ -19,8 +19,8 @@ test('legal pages are linked globally and provide a contact channel', () => {
 test('seller and buyer terms preserve source rights and payment verification safeguards', () => {
   assert.match(terms, /Public availability does not automatically mean/);
   assert.match(terms, /source-specific approval/);
-  assert.match(terms, /verified payment confirmation/);
+  assert.match(terms, /receives and verifies the provider's payment confirmation/);
   assert.match(terms, /human review and authorization/);
   assert.match(privacy, /Stripe/);
-  assert.match(privacy, /Gmail tokens/);
+  assert.match(privacy, /Gmail connection tokens/);
 });
