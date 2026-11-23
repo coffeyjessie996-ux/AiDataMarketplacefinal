@@ -4,6 +4,9 @@ import type { PrismaClient } from '@prisma/client';
 import { analyzePublicResearchRecord } from '../services/ai-research-agent';
 import { finishAgentTask, startAgentTask } from '../services/agent-activity';
 
+const MAX_RECORDS_PER_RUN = 10;
+
+
 function authorized(requestHeader: string | undefined, secret: string): boolean {
   if (!requestHeader?.startsWith('Bearer ')) return false;
   const supplied = Buffer.from(requestHeader.slice(7));
@@ -76,7 +79,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       const pending = candidates.filter((record) => {
         const payload = asObject(record.payload);
         return !payload.aiResearchAnalysis;
-      }).slice(0, 10);
+      }).slice(0, MAX_RECORDS_PER_RUN);
 
       for (const record of pending) {
         processed += 1;
@@ -88,7 +91,8 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
             awardAmount: record.awardAmount?.toString() ?? null,
             sourceUrl: record.sourceUrl,
             payload: record.payload,
-          });
+          }, { forceRulesFallback: blockedByQuota });
+          if (researchResult.fallbackReason === 'provider_quota') blockedByQuota = true;
           const analysisMetadata = {
             ...researchResult.analysis,
             analysisMethod: researchResult.analysisMethod,
@@ -143,7 +147,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       const status = processed > 0 && failed === processed ? 'FAILED' : 'COMPLETED';
       await finishAgentTask(prisma, taskId, status, {
         message: pending.length
-          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum ten records are processed per run.`
+          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${blockedByQuota ? 'OpenAI quota is exhausted; remaining records used the no-cost rules fallback. ' : ''}${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum ${MAX_RECORDS_PER_RUN} records are processed per run.`
           : 'AI research run checked the latest 30 records; no unanalyzed records were found.',
         recordsFetched: processed,
         recordsSaved: saved,
@@ -156,7 +160,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
         analyzed: saved,
         failed,
         blockedByQuota,
-        perRunLimit: 5,
+        perRunLimit: MAX_RECORDS_PER_RUN,
         note: 'AI triage is an aid to research only. It does not verify suppliers, create sales, send outreach, or count as revenue.',
       });
     } catch (error) {
