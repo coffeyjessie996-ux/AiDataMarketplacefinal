@@ -15,7 +15,10 @@ test('quota exhaustion switches the rest of a batch to the no-cost fallback', ()
 
 test('the agent reports the actual per-run batch limit', () => {
   assert.match(route, /const MAX_RECORDS_PER_RUN = 10/);
-  assert.match(route, /slice\(0, MAX_RECORDS_PER_RUN\)/);
+  assert.match(route, /LIMIT \$\{MAX_RECORDS_PER_RUN\}/);
+  assert.match(route, /payload"->'aiResearchAnalysis' IS NULL/);
+  assert.doesNotMatch(route, /take: 500/);
   assert.match(route, /perRunLimit: MAX_RECORDS_PER_RUN/);
   assert.match(route, /Maximum \$\{MAX_RECORDS_PER_RUN\} records are processed per run/);
+  assert.match(route, /AI research run found no unanalyzed records/);
 });
