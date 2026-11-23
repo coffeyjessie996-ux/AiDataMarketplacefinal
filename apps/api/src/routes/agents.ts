@@ -2,6 +2,7 @@ import express from 'express';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
 import { SOURCE_RIGHTS_POLICY } from '../services/source-rights';
+import { analyzePublicResearchRecord } from '../services/ai-research-agent';
 
 type AuthReq = express.Request & { user?: User };
 const agentJobs = ['research_opportunity_scan', 'data_rights_audit', 'buyer_pipeline_audit'] as const;
@@ -97,6 +98,97 @@ export function createAgentsRouter(prisma: PrismaClient, auth: express.RequestHa
         status: 'FAILED', message: 'Agent audit failed. No external actions were taken.', recordsFailed: 1, completedAt: new Date(),
       } }).catch(() => undefined);
       return res.status(500).json({ error: 'Agent task failed. Check the activity feed for its status.' });
+    }
+  });
+
+
+  // Authenticated manual entry point for the same budget-limited research enrichment
+  // used by the cron runner. It never sends outreach, publishes listings, or handles money.
+  router.post('/research-enrichment/run', requireAgentRole, async (_req, res) => {
+    const limit = 10;
+    let taskId: string | null = null;
+    let processed = 0;
+    let saved = 0;
+    let failed = 0;
+    let blockedByQuota = false;
+    try {
+      const task = await prisma.agentTaskRun.create({
+        data: { agentName: 'Public-record research triage', agentType: 'ai_agent', taskName: 'Manually enrich Data Bank research', status: 'RUNNING', message: 'Authenticated manual research run started; maximum ten records.' },
+        select: { id: true },
+      });
+      taskId = task.id;
+      const pending = await prisma.$queryRaw<Array<{
+        id: string; source: string; sourceRecordId: string; supplierName: string | null;
+        awardAmount: string | null; sourceUrl: string; payload: unknown;
+      }>>`
+        SELECT "id", "source", "sourceRecordId", "supplierName",
+          "awardAmount"::text AS "awardAmount", "sourceUrl", "payload"
+        FROM "SupplierResearchRecord"
+        WHERE "payload" IS NULL OR "payload"->'aiResearchAnalysis' IS NULL
+          OR "payload"->'aiResearchAnalysis' = 'null'::jsonb
+        ORDER BY "retrievedAt" DESC
+        LIMIT ${limit}
+      `;
+      for (const record of pending) {
+        processed += 1;
+        try {
+          const result = await analyzePublicResearchRecord({
+            source: record.source, sourceRecordId: record.sourceRecordId,
+            supplierName: record.supplierName, awardAmount: record.awardAmount,
+            sourceUrl: record.sourceUrl, payload: record.payload,
+          }, { skipOpenAi: blockedByQuota });
+          if (result.fallbackReason === 'provider_quota') blockedByQuota = true;
+          const metadata = {
+            ...result.analysis, analysisMethod: result.analysisMethod,
+            ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
+            analysisType: result.analysisMethod === 'openai'
+              ? 'OpenAI-assisted public-record triage - not supplier verification'
+              : result.analysisMethod === 'gemini'
+                ? 'Gemini-assisted public-record triage - not supplier verification'
+                : 'Rules-based no-cost public-record triage - not supplier verification',
+            model: result.analysisMethod === 'openai'
+              ? (process.env.OPENAI_RESEARCH_MODEL || 'gpt-4o-mini')
+              : result.analysisMethod === 'gemini'
+                ? (process.env.GEMINI_RESEARCH_MODEL || 'gemini-2.5-flash-lite')
+                : 'deterministic-rules-v1',
+            generatedAt: new Date().toISOString(),
+          };
+          const changed = await prisma.$executeRaw`
+            UPDATE "SupplierResearchRecord"
+            SET "payload" = COALESCE("payload", '{}'::jsonb) ||
+              jsonb_build_object('aiResearchAnalysis', ${JSON.stringify(metadata)}::jsonb),
+              "updatedAt" = NOW()
+            WHERE "id" = ${record.id}
+          `;
+          if (changed !== 1) throw new Error('Research analysis could not be saved.');
+          const check = await prisma.supplierResearchRecord.findUnique({
+            where: { id: record.id }, select: { payload: true },
+          });
+          const payload = check?.payload && typeof check.payload === 'object'
+            ? check.payload as Record<string, unknown> : {};
+          if (!payload.aiResearchAnalysis) throw new Error('Saved analysis could not be verified.');
+          saved += 1;
+        } catch (error) {
+          failed += 1;
+          console.error('Manual research enrichment failed', error instanceof Error ? error.message : 'Unknown error');
+        }
+      }
+      const message = pending.length
+        ? `Manual research run complete: ${saved} records analyzed, ${failed} failed. Provider quota fallback: ${blockedByQuota ? 'used' : 'not triggered'}. Maximum ten records per run. No outreach, publication, or payments.`
+        : 'Manual research run found no unanalyzed Data Bank records.';
+      await prisma.agentTaskRun.update({ where: { id: taskId }, data: {
+        status: processed > 0 && failed === processed ? 'FAILED' : 'COMPLETED',
+        message, recordsFetched: processed, recordsSaved: saved, recordsFailed: failed, completedAt: new Date(),
+      } });
+      return res.json({ ok: failed === 0, taskId, processed, analyzed: saved, failed, perRunLimit: limit, blockedByQuota, message,
+        note: 'Research triage only. It does not verify suppliers, create sales, send outreach, publish listings, or count as revenue.' });
+    } catch (error) {
+      console.error('Manual research enrichment could not complete', error);
+      if (taskId) await prisma.agentTaskRun.update({ where: { id: taskId }, data: {
+        status: 'FAILED', message: 'Manual research run failed before completion.', recordsFetched: processed,
+        recordsSaved: saved, recordsFailed: failed + 1, completedAt: new Date(),
+      } }).catch(() => undefined);
+      return res.status(500).json({ error: 'Manual research run failed. Check the activity feed.' });
     }
   });
 
