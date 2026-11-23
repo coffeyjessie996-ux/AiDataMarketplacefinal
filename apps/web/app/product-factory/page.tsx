@@ -15,7 +15,7 @@ type ResearchRecord = {
   quality: { populatedFieldCount: number; hasSupplierName: boolean; hasSourceLink: boolean; classification: string };
 };
 
-type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; priceCents: number; licenseType: string; licenseStatus: string; licenseReviewNote: string; licenseEvidenceUrl: string; licenseReviewedAt: string | null; createdAt: string };
+type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; priceCents: number; licenseType: string; licenseStatus: string; licenseReviewNote: string; licenseEvidenceUrl: string; licenseReviewedAt: string | null; sellerRightsConfirmed: boolean; sellerRightsAttestationNote: string; createdAt: string };
 type ReviewDraft = { status: 'pending' | 'seller_reviewed' | 'blocked'; note: string; evidenceUrl: string };
 type PublishDraft = { priceUsd: string; licenseType: 'COMMERCIAL' | 'PERSONAL' | 'ENTERPRISE'; rightsConfirmed: boolean; attestationNote: string };
 
@@ -153,10 +153,10 @@ export default function ProductFactoryPage() {
     setPublishDrafts(current => ({
       ...current,
       [id]: {
-        priceUsd: current[id]?.priceUsd ?? (item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : ''),
+        priceUsd: current[id]?.priceUsd ?? (item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : item.sellerRightsAttestationNote.includes('$4.99') ? '4.99' : ''),
         licenseType: current[id]?.licenseType ?? (item.licenseType?.toUpperCase() as PublishDraft['licenseType']) ?? 'COMMERCIAL',
-        rightsConfirmed: current[id]?.rightsConfirmed ?? false,
-        attestationNote: current[id]?.attestationNote ?? '',
+        rightsConfirmed: current[id]?.rightsConfirmed ?? item.sellerRightsConfirmed,
+        attestationNote: current[id]?.attestationNote ?? item.sellerRightsAttestationNote,
         ...patch,
       },
     }));
@@ -164,10 +164,10 @@ export default function ProductFactoryPage() {
 
   const publishProduct = async (item: SavedProduct) => {
     const draft = publishDrafts[item.id] ?? {
-      priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : '',
+      priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : item.sellerRightsAttestationNote.includes('$4.99') ? '4.99' : '',
       licenseType: (item.licenseType?.toUpperCase() as PublishDraft['licenseType']) || 'COMMERCIAL',
-      rightsConfirmed: false,
-      attestationNote: '',
+      rightsConfirmed: item.sellerRightsConfirmed,
+      attestationNote: item.sellerRightsAttestationNote,
     };
     const price = Number(draft.priceUsd);
     if (!Number.isFinite(price) || price < 1 || price > 100000) {
@@ -309,10 +309,10 @@ export default function ProductFactoryPage() {
                       <p style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.5 }}>Only publish after you have checked the source terms and confirmed you have the rights to offer this dataset. Your confirmation is recorded with the listing.</p>
                       {(() => {
                         const publishDraft = publishDrafts[item.id] ?? {
-                          priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : '',
+                          priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : item.sellerRightsAttestationNote.includes('$4.99') ? '4.99' : '',
                           licenseType: (item.licenseType?.toUpperCase() as PublishDraft['licenseType']) || 'COMMERCIAL',
-                          rightsConfirmed: false,
-                          attestationNote: '',
+                          rightsConfirmed: item.sellerRightsConfirmed,
+                          attestationNote: item.sellerRightsAttestationNote,
                         };
                         return (
                           <>
