@@ -90,6 +90,32 @@ export default function AgentActivityPage() {
     }
   };
 
+
+  const runResearchEnrichment = async () => {
+    setRunningAgent('research_enrichment');
+    setRunFeedback('Starting authenticated research enrichment…');
+    setError('');
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('Please sign in first.');
+      const response = await fetch(`${API}/agents/research-enrichment/run`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Research run failed.');
+      setRunFeedback(result.message || `Research run finished: ${result.analyzed ?? 0} records analyzed.`);
+      await load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Research run failed.';
+      setRunFeedback(`The request did not complete: ${message}`);
+      setError(message);
+    } finally {
+      setRunningAgent('');
+    }
+  };
+
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => { void load(); }, 5000);
@@ -115,6 +141,12 @@ export default function AgentActivityPage() {
             View actual scheduled collector runs and public-record research triage tasks. This feed refreshes automatically every five seconds; it is not a claim that autonomous multi-agent sales or research teams are connected.
           </p>
         </header>
+
+        <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16, marginBottom: 18 }}>
+          <h2 style={{ marginTop: 0 }}>Run AI research enrichment</h2>
+          <p style={{ color: '#a8b6ca', lineHeight: 1.55 }}>Manually analyze up to 10 unanalyzed Data Bank records using the configured OpenAI provider, Gemini backup when quota is exhausted, or the no-cost rules fallback. This is authenticated and does not send emails, publish listings, or make payments.</p>
+          <button disabled={Boolean(runningAgent)} onClick={() => void runResearchEnrichment()} style={{ padding: '10px 15px', border: 0, borderRadius: 7, background: runningAgent === 'research_enrichment' ? '#475569' : '#0f766e', color: 'white', cursor: runningAgent ? 'wait' : 'pointer' }}>{runningAgent === 'research_enrichment' ? 'Analyzing up to 10 records…' : 'Run AI Research Now'}</button>
+        </section>
 
         <section style={{ background: '#101a2b', border: '1px solid #334155', borderRadius: 12, padding: 16, marginBottom: 18 }}>
           <h2 style={{ marginTop: 0 }}>Marketplace AI workforce</h2>
