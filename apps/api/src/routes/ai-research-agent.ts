@@ -147,7 +147,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       const status = processed > 0 && failed === processed ? 'FAILED' : 'COMPLETED';
       await finishAgentTask(prisma, taskId, status, {
         message: pending.length
-          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum ${MAX_RECORDS_PER_RUN} records are processed per run.`
+          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${blockedByQuota ? 'OpenAI quota is exhausted; remaining records used the no-cost rules fallback. ' : ''}${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum ${MAX_RECORDS_PER_RUN} records are processed per run.`
           : 'AI research run checked the latest 30 records; no unanalyzed records were found.',
         recordsFetched: processed,
         recordsSaved: saved,
