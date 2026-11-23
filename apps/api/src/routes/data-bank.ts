@@ -375,6 +375,8 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
           licenseReviewNote: (() => { try { return decodeURIComponent(readTag(product.tags, 'license-review-note:')); } catch { return ''; } })(),
           licenseEvidenceUrl: (() => { try { return decodeURIComponent(readTag(product.tags, 'license-review-evidence:')); } catch { return ''; } })(),
           licenseReviewedAt: readTag(product.tags, 'license-review-at:') || null,
+          sellerRightsConfirmed: Boolean(readTag(product.tags, 'seller-rights-attestation-note:')),
+          sellerRightsAttestationNote: (() => { try { return decodeURIComponent(readTag(product.tags, 'seller-rights-attestation-note:')); } catch { return ''; } })(),
           createdAt: product.createdAt,
         })),
       });
