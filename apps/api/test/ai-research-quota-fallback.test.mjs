@@ -20,5 +20,5 @@ test('the agent reports the actual per-run batch limit', () => {
   assert.doesNotMatch(route, /take: 500/);
   assert.match(route, /perRunLimit: MAX_RECORDS_PER_RUN/);
   assert.match(route, /Maximum \$\{MAX_RECORDS_PER_RUN\} records are processed per run/);
-  assert.match(route, /no unanalyzed records were found/);
+  assert.match(route, /AI research run found no unanalyzed records/);
 });
