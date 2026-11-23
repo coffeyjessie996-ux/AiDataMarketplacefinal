@@ -62,24 +62,32 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
     const failureDetails: string[] = [];
     let blockedByQuota = false;
     try {
-      const candidates = await prisma.supplierResearchRecord.findMany({
-        orderBy: [{ retrievedAt: 'desc' }],
-        take: 500,
-        select: {
-          id: true,
-          source: true,
-          sourceRecordId: true,
-          supplierName: true,
-          awardAmount: true,
-          sourceUrl: true,
-          payload: true,
-        },
-      });
-
-      const pending = candidates.filter((record) => {
-        const payload = asObject(record.payload);
-        return !payload.aiResearchAnalysis;
-      }).slice(0, MAX_RECORDS_PER_RUN);
+      // Query only records that still need analysis. A fixed newest-500 scan could
+      // permanently skip older records once the newest window was fully analyzed.
+      const pending = await prisma.$queryRaw<Array<{
+        id: string;
+        source: string;
+        sourceRecordId: string;
+        supplierName: string | null;
+        awardAmount: string | null;
+        sourceUrl: string;
+        payload: unknown;
+      }>>`
+        SELECT
+          "id",
+          "source",
+          "sourceRecordId",
+          "supplierName",
+          "awardAmount"::text AS "awardAmount",
+          "sourceUrl",
+          "payload"
+        FROM "SupplierResearchRecord"
+        WHERE "payload" IS NULL
+          OR "payload"->'aiResearchAnalysis' IS NULL
+          OR "payload"->'aiResearchAnalysis' = 'null'::jsonb
+        ORDER BY "retrievedAt" DESC
+        LIMIT ${MAX_RECORDS_PER_RUN}
+      `;
 
       for (const record of pending) {
         processed += 1;
@@ -148,7 +156,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       await finishAgentTask(prisma, taskId, status, {
         message: pending.length
           ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${blockedByQuota ? 'OpenAI quota is exhausted; remaining records used the no-cost rules fallback. ' : ''}${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum ${MAX_RECORDS_PER_RUN} records are processed per run.`
-          : 'AI research run checked the latest 30 records; no unanalyzed records were found.',
+          : 'AI research run found no unanalyzed records.',
         recordsFetched: processed,
         recordsSaved: saved,
         recordsFailed: failed,
