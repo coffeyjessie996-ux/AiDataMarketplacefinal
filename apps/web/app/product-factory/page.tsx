@@ -51,6 +51,11 @@ export default function ProductFactoryPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
+  const defaultPublishLicense = (item: SavedProduct): PublishDraft['licenseType'] => {
+    const value = item.licenseType?.toUpperCase();
+    return value === 'COMMERCIAL' || value === 'PERSONAL' || value === 'ENTERPRISE' ? value : 'COMMERCIAL';
+  };
+
   const headers = () => {
     const token = localStorage.getItem('auth_token');
     if (!token) throw new Error('Please sign in to use the Product Factory.');
@@ -154,7 +159,7 @@ export default function ProductFactoryPage() {
       ...current,
       [id]: {
         priceUsd: current[id]?.priceUsd ?? (item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : item.sellerRightsAttestationNote.includes('$4.99') ? '4.99' : ''),
-        licenseType: current[id]?.licenseType ?? (item.licenseType?.toUpperCase() as PublishDraft['licenseType']) ?? 'COMMERCIAL',
+        licenseType: current[id]?.licenseType ?? defaultPublishLicense(item),
         rightsConfirmed: current[id]?.rightsConfirmed ?? item.sellerRightsConfirmed,
         attestationNote: current[id]?.attestationNote ?? item.sellerRightsAttestationNote,
         ...patch,
@@ -165,7 +170,7 @@ export default function ProductFactoryPage() {
   const publishProduct = async (item: SavedProduct) => {
     const draft = publishDrafts[item.id] ?? {
       priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : item.sellerRightsAttestationNote.includes('$4.99') ? '4.99' : '',
-      licenseType: (item.licenseType?.toUpperCase() as PublishDraft['licenseType']) || 'COMMERCIAL',
+      licenseType: defaultPublishLicense(item),
       rightsConfirmed: item.sellerRightsConfirmed,
       attestationNote: item.sellerRightsAttestationNote,
     };
@@ -310,7 +315,7 @@ export default function ProductFactoryPage() {
                       {(() => {
                         const publishDraft = publishDrafts[item.id] ?? {
                           priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : item.sellerRightsAttestationNote.includes('$4.99') ? '4.99' : '',
-                          licenseType: (item.licenseType?.toUpperCase() as PublishDraft['licenseType']) || 'COMMERCIAL',
+                          licenseType: defaultPublishLicense(item),
                           rightsConfirmed: item.sellerRightsConfirmed,
                           attestationNote: item.sellerRightsAttestationNote,
                         };
