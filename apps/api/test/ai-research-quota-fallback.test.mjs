@@ -5,12 +5,15 @@ import test from 'node:test';
 const service = readFileSync(new URL('../src/services/ai-research-agent.ts', import.meta.url), 'utf8');
 const route = readFileSync(new URL('../src/routes/ai-research-agent.ts', import.meta.url), 'utf8');
 
-test('quota exhaustion switches the rest of a batch to the no-cost fallback', () => {
-  assert.match(service, /options: \{ forceRulesFallback\?: boolean \}/);
-  assert.match(service, /if \(!apiKey \|\| options\.forceRulesFallback\)/);
-  assert.match(route, /forceRulesFallback: blockedByQuota/);
+test('OpenAI quota exhaustion switches the rest of a batch to Gemini when configured', () => {
+  assert.match(service, /GEMINI_API_KEY/);
+  assert.match(service, /forceRulesFallback\?: boolean; skipOpenAi\?: boolean/);
+  assert.match(service, /if \(openAiKey && !options\.skipOpenAi\)/);
+  assert.match(service, /generativelanguage\.googleapis\.com/);
+  assert.match(service, /analysisMethod: 'gemini'/);
+  assert.match(route, /skipOpenAi: blockedByQuota/);
   assert.match(route, /researchResult\.fallbackReason === 'provider_quota'\) blockedByQuota = true/);
-  assert.match(route, /OpenAI quota is exhausted; remaining records used the no-cost rules fallback/);
+  assert.match(route, /Gemini backup when configured/);
 });
 
 test('the agent reports the actual per-run batch limit', () => {
