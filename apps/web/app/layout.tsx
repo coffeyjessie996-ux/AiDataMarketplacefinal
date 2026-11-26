@@ -1,9 +1,31 @@
 import './globals.css';
 import type { Metadata } from 'next';
 
+const siteUrl = 'https://aidatamarketplacefinal.vercel.app';
+
 export const metadata: Metadata = {
-  title: 'AI Data Marketplace',
-  description: 'Automated data discovery, cleaning, and monetization platform',
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: 'AI Data Marketplace | Supplier & Business Intelligence',
+    template: '%s | AI Data Marketplace',
+  },
+  description:
+    'Discover supplier intelligence, business directories, and procurement research for procurement teams, B2B sales organizations, manufacturers, and market researchers.',
+  alternates: { canonical: '/' },
+  openGraph: {
+    type: 'website',
+    url: siteUrl,
+    siteName: 'AI Data Marketplace',
+    title: 'AI Data Marketplace | Supplier & Business Intelligence',
+    description:
+      'Explore source-aware supplier intelligence, business directories, and procurement research for business buyers.',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'AI Data Marketplace | Supplier & Business Intelligence',
+    description:
+      'Explore source-aware supplier intelligence, business directories, and procurement research for business buyers.',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -18,6 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <small>Source-aware data research and marketplace services.</small>
             </div>
             <nav aria-label="Legal and support" style={{ display: 'flex', flexWrap: 'wrap', gap: 18 }}>
+              <a href="/for-businesses" style={{ color: '#cbd5e1' }}>For business buyers</a>
               <a href="/privacy" style={{ color: '#cbd5e1' }}>Privacy Policy</a>
               <a href="/terms" style={{ color: '#cbd5e1' }}>Terms of Service</a>
               <a href="mailto:coffeyjessie996@gmail.com" style={{ color: '#cbd5e1' }}>Contact</a>
