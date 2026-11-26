@@ -217,7 +217,7 @@ export async function processWeatherSubscriptionStripeEvent(
   try {
     if (isCheckout) {
       const session = event.data.object as Stripe.Checkout.Session;
-      if (session.mode !== 'subscription') throw new Error('Weather subscription webhook received a non-subscription checkout.');
+      if (session.mode !== 'subscription' || session.metadata?.product !== 'weather_planning') return true;
       const userId = session.metadata?.userId;
       const planKey = session.metadata?.planKey;
       const subscriptionId = typeof session.subscription === 'string'
@@ -233,6 +233,8 @@ export async function processWeatherSubscriptionStripeEvent(
       await saveSubscription(prisma, subscription, userId, planKey);
     } else if (isSubscription) {
       const subscription = event.data.object as Stripe.Subscription;
+      const existing = await prisma.weatherSubscription.findUnique({ where: { stripeSubscriptionId: subscription.id } });
+      if (subscription.metadata?.product !== 'weather_planning' && !existing) return true;
       await saveSubscription(prisma, subscription);
     } else {
       const invoice = event.data.object as unknown as { subscription?: string | { id: string } | null };
@@ -241,6 +243,8 @@ export async function processWeatherSubscriptionStripeEvent(
         : invoice.subscription?.id;
       if (subscriptionId) {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const existing = await prisma.weatherSubscription.findUnique({ where: { stripeSubscriptionId: subscriptionId } });
+        if (subscription.metadata?.product !== 'weather_planning' && !existing) return true;
         await saveSubscription(prisma, subscription);
       }
     }
