@@ -1226,7 +1226,7 @@ app.post('/webhooks/stripe', async (req, res) => {
       event.type.startsWith('customer.subscription.') ||
       event.type === 'invoice.paid' ||
       event.type === 'invoice.payment_failed' ||
-      (event.type === 'checkout.session.completed' && webhookObject.mode === 'subscription');
+      (event.type === 'checkout.session.completed' && webhookObject.mode === 'subscription' && webhookObject.metadata?.product === 'weather_planning');
     if (isWeatherSubscriptionEvent) {
       await processWeatherSubscriptionStripeEvent(prisma, stripe, event);
       return res.json({ received: true });
