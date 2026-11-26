@@ -541,6 +541,15 @@ app.post('/buyer-inquiries', async (req, res) => {
     });
     if (recent >= 3) return res.status(429).json({ error: 'We have received your recent requests. Please wait before submitting again.' });
 
+    const weatherPlanLabels: Record<string, string> = {
+      'under-25': 'Starter — $19/month proposed',
+      '25-49': 'Team — $39/month proposed',
+      '50-99': 'Multi-site — $59+/month proposed',
+      '100-249': '$100–$249/month',
+      '250-plus': '$250+/month',
+      'not-sure': 'Not sure yet',
+    };
+
     await prisma.buyerDemandEvent.create({
       data: {
         query: 'buyer_inquiry',
@@ -550,7 +559,7 @@ app.post('/buyer-inquiries', async (req, res) => {
         buyerEmail: email,
         companyName: parsed.data.company,
         interest: parsed.data.interest,
-        message: [parsed.data.message, parsed.data.interest === 'weather-planning' ? `Monthly budget interest: ${parsed.data.budgetRange}` : ''].filter(Boolean).join('\n\n') || null,
+        message: [parsed.data.message, parsed.data.interest === 'weather-planning' ? `Monthly plan interest: ${weatherPlanLabels[parsed.data.budgetRange] ?? 'Not sure yet'}` : ''].filter(Boolean).join('\n\n') || null,
         status: 'NEW',
         contactConsentAt: new Date(),
       },
