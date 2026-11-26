@@ -169,9 +169,9 @@ export async function analyzePublicResearchRecord(
       const providerBody = await response.text().catch(() => '');
       const providerDiagnostic = providerBody
         .replaceAll(geminiKey, '[redacted]')
-        .replace(/Bearer\\s+\\S+/gi, 'Bearer [redacted]')
-        .replace(/(api[_-]?key[\\\"'\\s:=]+)[^\\s,\\\"']+/gi, '$1[redacted]')
-        .replace(/\\s+/g, ' ')
+        .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+        .replace(/(api[_-]?key[\"'\s:=]+)[^\s,\"']+/gi, '$1[redacted]')
+        .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 220);
       return {
