@@ -81,3 +81,17 @@ test('public weather pilot clearly attributes the live sample and separates cons
   assert.ok(pilot.includes('budgetRange'));
   assert.ok(page.includes("canonical: '/weather-pilot'"));
 });
+
+test('weather pilot validates recurring price interest without presenting checkout as active', () => {
+  const pilot = readFileSync(new URL('../../web/app/weather-pilot/weather-pilot.tsx', import.meta.url), 'utf8');
+  const api = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+  assert.match(pilot, /\$19/);
+  assert.match(pilot, /\$39/);
+  assert.match(pilot, /\$59\+/);
+  assert.match(pilot, /No payment is collected on this page/);
+  assert.match(pilot, /not an order, subscription, or commitment/);
+  assert.match(api, /Monthly plan interest:/);
+  assert.match(api, /Starter — \$19\/month proposed/);
+  assert.match(api, /Team — \$39\/month proposed/);
+  assert.match(api, /Multi-site — \$59\+\/month proposed/);
+});

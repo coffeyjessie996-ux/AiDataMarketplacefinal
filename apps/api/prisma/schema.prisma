@@ -28,6 +28,7 @@ model User {
   gmailOAuthStates GmailOAuthState[]
   outboundEmails OutboundEmail[]
   emailSendQuotas EmailSendQuota[]
+  weatherSubscriptions WeatherSubscription[]
 }
 
 model WalletAccount {
@@ -392,4 +393,31 @@ model EmailSendQuota {
   updatedAt   DateTime @updatedAt
 
   @@index([userId, day])
+}
+
+
+model WeatherSubscription {
+  id                    String   @id @default(cuid())
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeCustomerId      String
+  stripeSubscriptionId  String   @unique
+  stripePriceId         String?
+  planKey               String
+  status                String
+  currentPeriodEnd      DateTime?
+  cancelAtPeriodEnd     Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([stripeCustomerId])
+}
+
+model StripeWebhookEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now())
+
+  @@index([type, processedAt])
 }

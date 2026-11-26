@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
+import WeatherSubscriptionTestControls from './weather-subscription-test-controls';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -166,17 +167,42 @@ export default function WeatherPilot() {
         ))}
       </section>
 
+      <section aria-labelledby="plans-heading" style={{ marginTop: 28, ...panel }}>
+        <p style={{ color: '#67e8f9', fontSize: 12, fontWeight: 800, letterSpacing: '.16em' }}>RECURRING SERVICE · PRICING VALIDATION</p>
+        <h2 id="plans-heading" style={{ color: '#fff', fontSize: 28, margin: '8px 0 10px' }}>Simple monthly plans for weather-sensitive work.</h2>
+        <p style={{ color: '#cbd5e1', lineHeight: 1.65, maxWidth: 800 }}>These are proposed pilot prices we are testing with contractors—not active subscriptions or a promise that every feature is already available. We will only begin billing after the service, plan limits, and cancellation process are ready.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 14, marginTop: 18 }}>
+          <article style={{ ...panel, background: '#0b1726' }}>
+            <h3 style={{ color: '#fff', margin: '0 0 8px' }}>Starter</h3>
+            <p style={{ color: '#67e8f9', fontSize: 30, fontWeight: 900, margin: '0 0 10px' }}>$19<span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 500 }}>/month proposed</span></p>
+            <p style={{ color: '#cbd5e1', lineHeight: 1.6 }}>One saved work area, daily forecast brief, rain and wind context, and source timestamps.</p>
+          </article>
+          <article style={{ ...panel, background: '#0b1726', borderColor: 'rgba(103,232,249,.55)' }}>
+            <h3 style={{ color: '#fff', margin: '0 0 8px' }}>Team</h3>
+            <p style={{ color: '#67e8f9', fontSize: 30, fontWeight: 900, margin: '0 0 10px' }}>$39<span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 500 }}>/month proposed</span></p>
+            <p style={{ color: '#cbd5e1', lineHeight: 1.6 }}>Multiple work areas, team-ready summaries, and configurable weather-sensitive planning prompts.</p>
+          </article>
+          <article style={{ ...panel, background: '#0b1726' }}>
+            <h3 style={{ color: '#fff', margin: '0 0 8px' }}>Multi-site</h3>
+            <p style={{ color: '#67e8f9', fontSize: 30, fontWeight: 900, margin: '0 0 10px' }}>$59+<span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 500 }}>/month proposed</span></p>
+            <p style={{ color: '#cbd5e1', lineHeight: 1.6 }}>For operators coordinating several crews or service areas. Final limits and price will depend on pilot feedback.</p>
+          </article>
+        </div>
+        <p style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.6, marginBottom: 0 }}>No payment is collected on this page. Subscriptions, automatic renewals, and billing will not be enabled until checkout, webhook verification, plan access, and cancellation are tested.</p>
+        <WeatherSubscriptionTestControls />
+      </section>
+
       <section id="pilot-interest" style={{ marginTop: 28, ...panel }}>
         <p style={{ color: '#67e8f9', fontSize: 12, fontWeight: 800, letterSpacing: '.16em' }}>CUSTOMER DISCOVERY</p>
         <h2 style={{ color: '#fff', fontSize: 28, margin: '8px 0 10px' }}>Help shape the contractor weather pilot.</h2>
-        <p style={{ color: '#cbd5e1', lineHeight: 1.65, maxWidth: 780 }}>Tell us what kind of work you schedule, which locations matter, and what budget range could make a useful service worthwhile. This is research only—not an order, subscription, or commitment.</p>
+        <p style={{ color: '#cbd5e1', lineHeight: 1.65, maxWidth: 780 }}>Tell us what kind of work you schedule, which locations matter, and which proposed monthly plan you would genuinely consider. This is research only—not an order, subscription, or commitment.</p>
         <form onSubmit={submitInquiry} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 14, marginTop: 20 }}>
           <label style={{ display: 'grid', gap: 6, color: '#dbeafe', fontSize: 13 }}>Your name<input name="name" required minLength={2} maxLength={100} autoComplete="name" style={fieldStyle} /></label>
           <label style={{ display: 'grid', gap: 6, color: '#dbeafe', fontSize: 13 }}>Work email<input name="email" type="email" required maxLength={254} autoComplete="email" style={fieldStyle} /></label>
           <label style={{ display: 'grid', gap: 6, color: '#dbeafe', fontSize: 13 }}>Company or team<input name="company" required minLength={2} maxLength={160} autoComplete="organization" style={fieldStyle} /></label>
-          <label style={{ display: 'grid', gap: 6, color: '#dbeafe', fontSize: 13 }}>Possible monthly budget
+          <label style={{ display: 'grid', gap: 6, color: '#dbeafe', fontSize: 13 }}>Which monthly price would you seriously consider?
             <select name="budgetRange" defaultValue="not-sure" style={fieldStyle}>
-              <option value="not-sure">Not sure yet</option><option value="under-25">Under $25</option><option value="25-49">$25–$49</option><option value="50-99">$50–$99</option><option value="100-249">$100–$249</option><option value="250-plus">$250+</option>
+              <option value="not-sure">Not sure yet</option><option value="under-25">Starter — $19/month</option><option value="25-49">Team — $39/month</option><option value="50-99">Multi-site — $59+/month</option><option value="100-249">$100–$249/month</option><option value="250-plus">$250+/month</option>
             </select>
           </label>
           <label style={{ display: 'grid', gap: 6, color: '#dbeafe', fontSize: 13, gridColumn: '1 / -1' }}>What work and locations matter? <textarea name="message" rows={4} maxLength={1500} placeholder="For example: roofing crews in two counties; need rain and wind windows 24–72 hours ahead." style={{ ...fieldStyle, resize: 'vertical' }} /></label>
@@ -186,7 +212,7 @@ export default function WeatherPilot() {
             I agree that AI Data Marketplace may use these details to respond to this weather-pilot request. This is not consent to unrelated marketing.
           </label>
           <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-            <button type="submit" disabled={busy} style={{ padding: '13px 20px', borderRadius: 9, background: busy ? '#475569' : 'linear-gradient(135deg,#38bdf8,#14b8a6)', color: '#04111b', fontWeight: 800, border: 0 }}>{busy ? 'Sending…' : 'Register pilot interest'}</button>
+            <button type="submit" disabled={busy} style={{ padding: '13px 20px', borderRadius: 9, background: busy ? '#475569' : 'linear-gradient(135deg,#38bdf8,#14b8a6)', color: '#04111b', fontWeight: 800, border: 0 }}>{busy ? 'Sending…' : 'Share pilot interest'}</button>
             {submitted && <span role="status" style={{ color: '#86efac', fontSize: 13 }}>{submitted}</span>}
             {error && <span role="alert" style={{ color: '#fca5a5', fontSize: 13 }}>{error}</span>}
           </div>

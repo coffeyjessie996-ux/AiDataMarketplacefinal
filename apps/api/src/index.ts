@@ -20,6 +20,7 @@ import { createAiResearchAgentRouter } from './routes/ai-research-agent';
 import { createOperationsRouter } from './routes/operations';
 import { createAuctionsRouter } from './routes/auctions';
 import { createGmailRouter } from './routes/gmail';
+import { createWeatherSubscriptionsRouter, processWeatherSubscriptionStripeEvent } from './routes/weather-subscriptions';
 import { finishAgentTask, startAgentTask } from './services/agent-activity';
 import { upsertResearchRecordPreservingAnalysis } from './services/research-records';
 import { isApprovedNwsForecastRecord, isCommercialReuseApproved } from './services/source-rights';
@@ -541,6 +542,15 @@ app.post('/buyer-inquiries', async (req, res) => {
     });
     if (recent >= 3) return res.status(429).json({ error: 'We have received your recent requests. Please wait before submitting again.' });
 
+    const weatherPlanLabels: Record<string, string> = {
+      'under-25': 'Starter — $19/month proposed',
+      '25-49': 'Team — $39/month proposed',
+      '50-99': 'Multi-site — $59+/month proposed',
+      '100-249': '$100–$249/month',
+      '250-plus': '$250+/month',
+      'not-sure': 'Not sure yet',
+    };
+
     await prisma.buyerDemandEvent.create({
       data: {
         query: 'buyer_inquiry',
@@ -550,7 +560,7 @@ app.post('/buyer-inquiries', async (req, res) => {
         buyerEmail: email,
         companyName: parsed.data.company,
         interest: parsed.data.interest,
-        message: [parsed.data.message, parsed.data.interest === 'weather-planning' ? `Monthly budget interest: ${parsed.data.budgetRange}` : ''].filter(Boolean).join('\n\n') || null,
+        message: [parsed.data.message, parsed.data.interest === 'weather-planning' ? `Monthly plan interest: ${weatherPlanLabels[parsed.data.budgetRange] ?? 'Not sure yet'}` : ''].filter(Boolean).join('\n\n') || null,
         status: 'NEW',
         contactConsentAt: new Date(),
       },
@@ -1043,6 +1053,8 @@ const stripeClient = () => {
   return new Stripe(secretKey);
 };
 
+app.use('/weather-subscriptions', createWeatherSubscriptionsRouter(prisma, requireAuth, stripeClient));
+
 // Stripe Checkout is gated until secure dataset delivery and its end-to-end tests are verified.
 app.get('/orders/:id', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
@@ -1209,7 +1221,18 @@ app.post('/webhooks/stripe', async (req, res) => {
   }
 
   try {
-    const session = event.data.object as Stripe.Checkout.Session;
+    const webhookObject = event.data.object as Stripe.Checkout.Session;
+    const isWeatherSubscriptionEvent =
+      event.type.startsWith('customer.subscription.') ||
+      event.type === 'invoice.paid' ||
+      event.type === 'invoice.payment_failed' ||
+      (event.type === 'checkout.session.completed' && webhookObject.mode === 'subscription' && webhookObject.metadata?.product === 'weather_planning');
+    if (isWeatherSubscriptionEvent) {
+      await processWeatherSubscriptionStripeEvent(prisma, stripe, event);
+      return res.json({ received: true });
+    }
+
+    const session = webhookObject;
     if ([
       'checkout.session.completed',
       'checkout.session.async_payment_succeeded',
