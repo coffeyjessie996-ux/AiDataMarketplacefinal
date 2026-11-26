@@ -59,3 +59,13 @@ test('subscription routes require the existing authenticated API middleware', ()
   assert.match(route, /router\.post\('\/portal', auth/);
   assert.match(route, /router\.get\('\/status', auth/);
 });
+
+test('pilot page exposes checkout controls only behind an explicit public preview flag', () => {
+  const controls = readFileSync(new URL('../../web/app/weather-pilot/weather-subscription-test-controls.tsx', import.meta.url), 'utf8');
+  const page = readFileSync(new URL('../../web/app/weather-pilot/weather-pilot.tsx', import.meta.url), 'utf8');
+  assert.match(controls, /NEXT_PUBLIC_WEATHER_SUBSCRIPTIONS_TEST_ENABLED === 'true'/);
+  assert.match(controls, /if \(!ENABLED\) return null/);
+  assert.match(controls, /localStorage\.getItem\('auth_token'\)/);
+  assert.match(controls, /Manage \/ cancel test plan/);
+  assert.match(page, /WeatherSubscriptionTestControls/);
+});
