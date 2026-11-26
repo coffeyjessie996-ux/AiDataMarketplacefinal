@@ -15,6 +15,8 @@ export type AiResearchResult = {
   analysis: AiResearchAnalysis;
   analysisMethod: 'openai' | 'gemini' | 'rules_fallback';
   fallbackReason?: 'missing_api_key' | 'provider_quota' | 'provider_unavailable';
+  providerStatus?: number;
+  providerDiagnostic?: string;
 };
 
 function extractOpenAiText(payload: unknown): string {
@@ -162,14 +164,25 @@ export async function analyzePublicResearchRecord(
         const analysis = parseAnalysis(extractGeminiText(await response.json()));
         return { analysis, analysisMethod: 'gemini', fallbackReason: openAiQuotaExceeded ? 'provider_quota' : openAiKey ? 'provider_unavailable' : 'missing_api_key' };
       }
-      // Do not leak provider response bodies or credentials into task logs.
+      // Keep a short, credential-redacted diagnostic so production runs reveal why
+      // Gemini fell back instead of reporting a misleading successful AI analysis.
+      const providerBody = await response.text().catch(() => '');
+      const providerDiagnostic = providerBody
+        .replaceAll(geminiKey, '[redacted]')
+        .replace(/Bearer\\s+\\S+/gi, 'Bearer [redacted]')
+        .replace(/(api[_-]?key[\\\"'\\s:=]+)[^\\s,\\\"']+/gi, '$1[redacted]')
+        .replace(/\\s+/g, ' ')
+        .trim()
+        .slice(0, 220);
       return {
         analysis: deterministicAnalysis(),
         analysisMethod: 'rules_fallback',
         fallbackReason: openAiQuotaExceeded || response.status === 429 ? 'provider_quota' : 'provider_unavailable',
+        providerStatus: response.status,
+        ...(providerDiagnostic ? { providerDiagnostic } : {}),
       };
     } catch {
-      return { analysis: deterministicAnalysis(), analysisMethod: 'rules_fallback', fallbackReason: openAiQuotaExceeded ? 'provider_quota' : 'provider_unavailable' };
+      return { analysis: deterministicAnalysis(), analysisMethod: 'rules_fallback', fallbackReason: openAiQuotaExceeded ? 'provider_quota' : 'provider_unavailable', providerDiagnostic: error instanceof Error ? error.message.replaceAll(geminiKey, '[redacted]').slice(0, 220) : 'Gemini request failed before an HTTP response.' };
     }
   }
 
