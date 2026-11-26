@@ -26,7 +26,7 @@ test('weather subscription checkout is opt-in test mode and cannot run on produc
 test('subscription access is granted only from verified server-side subscription status', () => {
   assert.match(route, /\['active', 'trialing'\]\.includes\(subscription\.status\)/);
   assert.match(route, /processWeatherSubscriptionStripeEvent/);
-  assert.match(api, /stripe\\.webhooks\\.constructEvent/);
+  assert.match(api, /stripe\.webhooks\.constructEvent/);
   assert.match(api, /constructEvent\(rawBody, signature, webhookSecret\)/);
   assert.match(api, /processWeatherSubscriptionStripeEvent\(prisma, stripe, event\)/);
 });
