@@ -31,7 +31,7 @@ test('Gemini provider failures retain sanitized status diagnostics for productio
   assert.match(service, /providerStatus\?: number/);
   assert.match(service, /providerDiagnostic\?: string/);
   assert.match(service, /providerStatus: response.status/);
-  assert.match(service, /replaceAll\(geminiKey, '\\[redacted\\]'\)/);
+  assert.ok(service.includes("replaceAll(geminiKey, '[redacted]')"));
   assert.match(route, /researchResult\.providerStatus/);
   assert.match(route, /researchResult\.providerDiagnostic/);
 });
