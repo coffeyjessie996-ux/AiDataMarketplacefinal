@@ -25,3 +25,13 @@ test('the agent reports the actual per-run batch limit', () => {
   assert.match(route, /Maximum \$\{MAX_RECORDS_PER_RUN\} records are processed per run/);
   assert.match(route, /AI research run found no unanalyzed records/);
 });
+
+
+test('Gemini provider failures retain sanitized status diagnostics for production diagnosis', () => {
+  assert.match(service, /providerStatus\?: number/);
+  assert.match(service, /providerDiagnostic\?: string/);
+  assert.match(service, /providerStatus: response.status/);
+  assert.match(service, /replaceAll\(geminiKey, '\\[redacted\\]'\)/);
+  assert.match(route, /researchResult\.providerStatus/);
+  assert.match(route, /researchResult\.providerDiagnostic/);
+});
