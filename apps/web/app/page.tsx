@@ -116,15 +116,11 @@ export default function HomePage() {
         <div className="hero-grid">
           <div>
             <span className="eyebrow">AI DATA MARKETPLACE</span>
-            <h1>Search the web, clean the data, and sell it at scale.</h1>
+            <h1>Supplier intelligence that helps businesses find their next opportunity.</h1>
             <p>
-              Discover market signals, organize real supplier and business intelligence, and prepare datasets for marketplace sales. {overview?.paymentProcessingEnabled ? 'Eligible published listings can use secure Stripe checkout, and delivery unlocks only after payment is confirmed.' : overview ? 'Checkout is currently disabled. You can browse the catalog and request a data preview, but purchases cannot be completed yet.' : 'Live checkout availability is being checked.'}
+              Explore source-aware supplier and business intelligence for procurement, B2B sales, partner discovery, and market research. Preview available data before you buy. {overview?.paymentProcessingEnabled ? 'Eligible published listings can use secure Stripe checkout, and delivery unlocks only after payment is confirmed.' : overview ? 'Checkout is currently disabled. You can browse the catalog and request a data preview, but purchases cannot be completed yet.' : 'Live checkout availability is being checked.'}
             </p>
             <div className="cta-row">
-              <a href="#catalog" className="primary-button">Browse datasets</a>
-              <a href="/for-businesses#buyer-inquiry" className="secondary-button">Request a data preview</a>
-              <a href="/dashboard" className="secondary-button">View analytics</a>
-            </div>            <div className="cta-row">
               <a href="#catalog" className="primary-button">Browse datasets</a>
               <a href="/for-businesses#buyer-inquiry" className="secondary-button">Request a data preview</a>
               <a href="/dashboard" className="secondary-button">View analytics</a>
