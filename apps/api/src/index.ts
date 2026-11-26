@@ -20,6 +20,7 @@ import { createAiResearchAgentRouter } from './routes/ai-research-agent';
 import { createOperationsRouter } from './routes/operations';
 import { createAuctionsRouter } from './routes/auctions';
 import { createGmailRouter } from './routes/gmail';
+import { createWeatherSubscriptionsRouter, processWeatherSubscriptionStripeEvent } from './routes/weather-subscriptions';
 import { finishAgentTask, startAgentTask } from './services/agent-activity';
 import { upsertResearchRecordPreservingAnalysis } from './services/research-records';
 import { isApprovedNwsForecastRecord, isCommercialReuseApproved } from './services/source-rights';
@@ -1052,6 +1053,8 @@ const stripeClient = () => {
   return new Stripe(secretKey);
 };
 
+app.use('/weather-subscriptions', createWeatherSubscriptionsRouter(prisma, requireAuth, stripeClient));
+
 // Stripe Checkout is gated until secure dataset delivery and its end-to-end tests are verified.
 app.get('/orders/:id', requireAuth, async (req, res) => {
   const user = (req as express.Request & { user?: User }).user;
@@ -1218,7 +1221,18 @@ app.post('/webhooks/stripe', async (req, res) => {
   }
 
   try {
-    const session = event.data.object as Stripe.Checkout.Session;
+    const webhookObject = event.data.object as Stripe.Checkout.Session;
+    const isWeatherSubscriptionEvent =
+      event.type.startsWith('customer.subscription.') ||
+      event.type === 'invoice.paid' ||
+      event.type === 'invoice.payment_failed' ||
+      (event.type === 'checkout.session.completed' && webhookObject.mode === 'subscription');
+    if (isWeatherSubscriptionEvent) {
+      await processWeatherSubscriptionStripeEvent(prisma, stripe, event);
+      return res.json({ received: true });
+    }
+
+    const session = webhookObject;
     if ([
       'checkout.session.completed',
       'checkout.session.async_payment_succeeded',
