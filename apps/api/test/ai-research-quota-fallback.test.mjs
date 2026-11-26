@@ -13,7 +13,7 @@ test('OpenAI quota exhaustion switches the rest of a batch to Gemini when config
   assert.match(service, /analysisMethod: 'gemini'/);
   assert.match(route, /skipOpenAi: blockedByQuota/);
   assert.match(route, /researchResult\.fallbackReason === 'provider_quota'\) blockedByQuota = true/);
-  assert.match(route, /Gemini backup when configured/);
+  assert.ok(route.includes('Gemini backup or used the no-cost rules fallback'));
 });
 
 test('the agent reports the actual per-run batch limit', () => {
@@ -31,7 +31,7 @@ test('Gemini provider failures retain sanitized status diagnostics for productio
   assert.match(service, /providerStatus\?: number/);
   assert.match(service, /providerDiagnostic\?: string/);
   assert.match(service, /providerStatus: response.status/);
-  assert.match(service, /replaceAll\(geminiKey, '\\[redacted\\]'\)/);
+  assert.ok(service.includes("replaceAll(geminiKey, '[redacted]')"));
   assert.match(route, /researchResult\.providerStatus/);
   assert.match(route, /researchResult\.providerDiagnostic/);
 });
