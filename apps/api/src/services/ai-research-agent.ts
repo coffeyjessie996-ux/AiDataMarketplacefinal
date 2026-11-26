@@ -181,7 +181,7 @@ export async function analyzePublicResearchRecord(
         providerStatus: response.status,
         ...(providerDiagnostic ? { providerDiagnostic } : {}),
       };
-    } catch {
+    } catch (error) {
       return { analysis: deterministicAnalysis(), analysisMethod: 'rules_fallback', fallbackReason: openAiQuotaExceeded ? 'provider_quota' : 'provider_unavailable', providerDiagnostic: error instanceof Error ? error.message.replaceAll(geminiKey, '[redacted]').slice(0, 220) : 'Gemini request failed before an HTTP response.' };
     }
   }
