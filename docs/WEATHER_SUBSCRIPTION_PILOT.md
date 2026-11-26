@@ -66,3 +66,17 @@ The existing one-time marketplace checkout or wallet display must not be assumed
 ## Success metrics
 
 Report only observed values: qualified inquiries, completed conversations, pilot customers, paid subscriptions, gross recurring revenue from verified invoices, failed payments, active usage, cancellations, and renewals. Keep forecast projections and price hypotheses visibly separate from actual revenue.
+
+
+## Implemented subscription foundation (test mode only)
+
+The feature branch now includes a database-backed subscription record, signed Stripe webhook processing, authenticated subscription status, test Checkout, and Stripe Billing Portal routes:
+
+- `POST /weather-subscriptions/checkout` accepts only `starter`, `team`, or `multi_site`; prices are $19, $39, and $59 per month in Stripe **test mode only**.
+- `GET /weather-subscriptions/status` reports access only when a verified webhook has stored an `active` or `trialing` subscription.
+- `POST /weather-subscriptions/portal` opens Stripe's test-mode customer portal for the signed-in account.
+- The existing signed `POST /webhooks/stripe` endpoint processes subscription checkout, subscription lifecycle, and invoice paid/failed events with event-ID deduplication.
+- Test checkout is disabled by default. It requires `WEATHER_SUBSCRIPTIONS_TEST_MODE_ENABLED=true`, a test-mode Stripe secret for the deployment environment, and the existing webhook signing secret. The API explicitly refuses this test checkout in Vercel Production.
+- Preview deployments must use `STRIPE_SECRET_TEST_KEY` and the Stripe webhook signing secret configured for the preview endpoint. Never put a secret in a `NEXT_PUBLIC_` variable or in source control.
+
+This is a backend billing foundation, not a public launch. It does not turn on checkout in production, create live prices, or prove that a buyer has paid. Before a live release, the remaining verification must include a real preview test with Stripe test cards, webhook delivery and retries, cancellation through the portal, failed invoice behavior, entitlement revocation, and a reviewed customer-facing terms/refund policy. The app's forecast product features and service levels also need to be implemented and validated before charging customers.
