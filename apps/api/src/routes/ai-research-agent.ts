@@ -105,6 +105,8 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
             ...researchResult.analysis,
             analysisMethod: researchResult.analysisMethod,
             ...(researchResult.fallbackReason ? { fallbackReason: researchResult.fallbackReason } : {}),
+            ...(researchResult.providerStatus ? { providerStatus: researchResult.providerStatus } : {}),
+            ...(researchResult.providerDiagnostic ? { providerDiagnostic: researchResult.providerDiagnostic } : {}),
             analysisType: researchResult.analysisMethod === 'openai'
               ? 'OpenAI-assisted public-record triage - not supplier verification'
               : researchResult.analysisMethod === 'gemini'
@@ -159,7 +161,7 @@ export function createAiResearchAgentRouter(prisma: PrismaClient) {
       const status = processed > 0 && failed === processed ? 'FAILED' : 'COMPLETED';
       await finishAgentTask(prisma, taskId, status, {
         message: pending.length
-          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${blockedByQuota ? 'OpenAI quota is exhausted; remaining records used the Gemini backup when configured, otherwise the no-cost rules fallback. ' : ''}${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum ${MAX_RECORDS_PER_RUN} records are processed per run.`
+          ? `AI research run finished: ${saved} records analyzed, ${failed} failed. ${blockedByQuota ? 'OpenAI quota is exhausted; remaining records attempted the Gemini backup or used the no-cost rules fallback. ' : ''}${failureDetails.length ? `Failure detail: ${failureDetails[0]}` : ''} Maximum ${MAX_RECORDS_PER_RUN} records are processed per run.`
           : 'AI research run found no unanalyzed records.',
         recordsFetched: processed,
         recordsSaved: saved,
