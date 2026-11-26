@@ -33,3 +33,10 @@ ALTER TABLE "WeatherSubscription"
   ADD CONSTRAINT "WeatherSubscription_userId_fkey"
   FOREIGN KEY ("userId") REFERENCES "User"("id")
   ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- The API accesses these tables through its server-side PostgreSQL connection.
+-- Keep them inaccessible to Supabase's public Data API roles.
+ALTER TABLE "WeatherSubscription" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "StripeWebhookEvent" ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE "WeatherSubscription" FROM anon, authenticated;
+REVOKE ALL ON TABLE "StripeWebhookEvent" FROM anon, authenticated;
