@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
+import WeatherSubscriptionTestControls from './weather-subscription-test-controls';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -188,6 +189,7 @@ export default function WeatherPilot() {
           </article>
         </div>
         <p style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.6, marginBottom: 0 }}>No payment is collected on this page. Subscriptions, automatic renewals, and billing will not be enabled until checkout, webhook verification, plan access, and cancellation are tested.</p>
+        <WeatherSubscriptionTestControls />
       </section>
 
       <section id="pilot-interest" style={{ marginTop: 28, ...panel }}>
