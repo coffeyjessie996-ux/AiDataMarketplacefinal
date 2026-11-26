@@ -1,6 +1,5 @@
 import express from 'express';
 import Stripe from 'stripe';
-import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
 import { z } from 'zod';
@@ -47,6 +46,7 @@ async function saveSubscription(
   subscription: Stripe.Subscription,
   userIdHint?: string,
   planKeyHint?: string,
+  statusOverride?: string,
 ) {
   const existing = await prisma.weatherSubscription.findUnique({
     where: { stripeSubscriptionId: subscription.id },
@@ -69,7 +69,7 @@ async function saveSubscription(
       stripeSubscriptionId: subscription.id,
       stripePriceId: subscription.items.data[0]?.price.id ?? null,
       planKey,
-      status: subscription.status,
+      status: statusOverride ?? subscription.status,
       currentPeriodEnd: periodEnd(subscription),
       cancelAtPeriodEnd: subscription.cancel_at_period_end,
     },
@@ -159,7 +159,7 @@ export function createWeatherSubscriptionsRouter(
         subscription_data: { metadata: { userId: user.id, planKey: parsed.data.planKey, product: 'weather_planning' } },
         success_url: `${baseUrl}/weather-pilot?subscription=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${baseUrl}/weather-pilot?subscription=cancelled`,
-      }, { idempotencyKey: `weather-subscription-${user.id}-${randomUUID()}` });
+      }, { idempotencyKey: `weather-subscription-${user.id}-${parsed.data.planKey}-${Math.floor(Date.now() / 300000)}` });
       if (!session.url) throw new Error('Stripe did not return a Checkout URL.');
       return res.status(201).json({ checkoutUrl: session.url, mode: 'test', planKey: parsed.data.planKey });
     } catch (error) {
@@ -245,7 +245,7 @@ export async function processWeatherSubscriptionStripeEvent(
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
         const existing = await prisma.weatherSubscription.findUnique({ where: { stripeSubscriptionId: subscriptionId } });
         if (subscription.metadata?.product !== 'weather_planning' && !existing) return true;
-        await saveSubscription(prisma, subscription);
+        await saveSubscription(prisma, subscription, undefined, undefined, event.type === 'invoice.payment_failed' ? 'past_due' : undefined);
       }
     }
     return true;
