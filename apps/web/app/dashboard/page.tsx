@@ -525,6 +525,8 @@ function DatasetsTab({ formatMoney }: { formatMoney: (cents: number) => string }
 
 function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string }) {
   const [orders, setOrders] = useState<Array<{ id: string; datasetTitle: string; totalCents: number; currency: string; status: string; createdAt: string }>>([]);
+  const [subscriptions, setSubscriptions] = useState<Array<{ id: string; datasetTitle: string; amountCents: number; interval: string; status: string; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean }>>([]);
+  const [subscriptionAction, setSubscriptionAction] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloadMessage, setDownloadMessage] = useState('');
@@ -571,13 +573,16 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
     const load = async () => {
       try {
         const token = localStorage.getItem('auth_token');
-        const res = await fetch(`${API}/dashboard/orders`, {
-          headers: { Authorization: `Bearer ${token || ''}` },
-          cache: 'no-store',
-        });
-        const data = await res.json().catch(() => ({}));
+        const [res, subscriptionRes] = await Promise.all([
+          fetch(`${API}/dashboard/orders`, { headers: { Authorization: `Bearer ${token || ''}` }, cache: 'no-store' }),
+          fetch(`${API}/subscriptions`, { headers: { Authorization: `Bearer ${token || ''}` }, cache: 'no-store' }),
+        ]);
+        const [data, subscriptionData] = await Promise.all([res.json().catch(() => ({})), subscriptionRes.json().catch(() => ({}))]);
         if (!res.ok) throw new Error(data.error || 'Unable to load purchases.');
-        if (!cancelled) setOrders(Array.isArray(data.orders) ? data.orders : []);
+        if (!cancelled) {
+          setOrders(Array.isArray(data.orders) ? data.orders : []);
+          setSubscriptions(subscriptionRes.ok && Array.isArray(subscriptionData.subscriptions) ? subscriptionData.subscriptions : []);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load purchases.');
       } finally {
@@ -587,6 +592,50 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
     void load();
     return () => { cancelled = true; };
   }, []);
+
+
+  const manageSubscription = async (subscriptionId: string) => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return setSubscriptionAction('Please sign in again.');
+    setSubscriptionAction('');
+    try {
+      const response = await fetch(`${API}/subscriptions/${encodeURIComponent(subscriptionId)}/portal`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.url !== 'string') throw new Error(data.error || 'Unable to open billing management.');
+      window.location.assign(data.url);
+    } catch (err) {
+      setSubscriptionAction(err instanceof Error ? err.message : 'Unable to open billing management.');
+    }
+  };
+
+  const downloadSubscription = async (subscriptionId: string) => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return setSubscriptionAction('Please sign in again.');
+    setSubscriptionAction('Preparing your subscription dataset…');
+    try {
+      const response = await fetch(`${API}/subscriptions/${encodeURIComponent(subscriptionId)}/download`, {
+        headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Unable to prepare your dataset.');
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'weather-subscription.csv';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setSubscriptionAction('Your subscription dataset download has started.');
+    } catch (err) {
+      setSubscriptionAction(err instanceof Error ? err.message : 'Download failed.');
+    }
+  };
 
   return (
     <div className="card">
@@ -620,6 +669,34 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
           </table>
         </div>
       )}
+
+      <div style={{ marginTop: 28 }}>
+        <h3 className="card-title">Recurring subscriptions</h3>
+        {subscriptionAction && <p role="status" style={{ color: '#94a3b8' }}>{subscriptionAction}</p>}
+        {subscriptions.length === 0 ? (
+          <p className="live-empty">No recurring subscriptions are active or recorded for this account.</p>
+        ) : (
+          <div className="table-container">
+            <table>
+              <thead><tr><th>Dataset</th><th>Price</th><th>Status</th><th>Current period ends</th><th>Actions</th></tr></thead>
+              <tbody>
+                {subscriptions.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.datasetTitle}</td>
+                    <td>{formatMoney(item.amountCents)} / {item.interval === 'year' ? 'year' : 'month'}</td>
+                    <td><span className={`badge ${item.status}`}>{item.status}</span>{item.cancelAtPeriodEnd ? ' · Cancels at period end' : ''}</td>
+                    <td>{item.currentPeriodEnd ? new Date(item.currentPeriodEnd).toLocaleDateString() : 'Pending confirmation'}</td>
+                    <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {['active', 'trialing'].includes(item.status) && <button className="primary-button" type="button" onClick={() => void downloadSubscription(item.id)}>Download</button>}
+                      <button className="secondary-button" type="button" onClick={() => void manageSubscription(item.id)}>Manage / cancel</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
