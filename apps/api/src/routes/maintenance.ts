@@ -1,7 +1,7 @@
 import express from 'express';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
-import { reconcileStaleAgentTasks, STALE_AGENT_TASK_MINUTES } from '../services/maintenance';
+import { inspectRecentMaintenanceFailures, reconcileStaleAgentTasks, STALE_AGENT_TASK_MINUTES } from '../services/maintenance';
 
 type AuthReq = express.Request & { user?: User };
 
@@ -21,7 +21,7 @@ export function createMaintenanceRouter(prisma: PrismaClient, auth: express.Requ
       const now = new Date();
       const staleBefore = new Date(now.getTime() - STALE_AGENT_TASK_MINUTES * 60_000);
       const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      const [staleRunning, failed24h, recentMaintenanceRuns] = await Promise.all([
+      const [staleRunning, failed24h, recentMaintenanceRuns, failureDiagnostics] = await Promise.all([
         prisma.agentTaskRun.count({ where: { status: 'RUNNING', startedAt: { lt: staleBefore } } }),
         prisma.agentTaskRun.count({ where: { status: 'FAILED', startedAt: { gte: since24h } } }),
         prisma.agentTaskRun.findMany({
@@ -30,6 +30,7 @@ export function createMaintenanceRouter(prisma: PrismaClient, auth: express.Requ
           take: 10,
           select: { id: true, taskName: true, status: true, message: true, startedAt: true, completedAt: true, recordsFetched: true },
         }),
+        inspectRecentMaintenanceFailures(prisma, now),
       ]);
       return res.json({
         source: 'live_database',
@@ -40,6 +41,7 @@ export function createMaintenanceRouter(prisma: PrismaClient, auth: express.Requ
           approvalRequiredFor: ['code changes', 'database migrations', 'data deletion', 'publishing', 'outbound messages', 'payments and payouts'],
         },
         incidents: { staleRunningTasks: staleRunning, failedTasksLast24Hours: failed24h },
+        failureDiagnostics,
         recentRepairs: recentMaintenanceRuns,
       });
     } catch (error) {
