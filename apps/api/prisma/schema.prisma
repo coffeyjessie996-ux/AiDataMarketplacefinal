@@ -22,6 +22,8 @@ model User {
   wallet        WalletAccount?
   payouts       Payout[]
   orders        Order[]
+  marketplaceSubscriptions MarketplaceSubscription[]
+  datasetRightsReviews DatasetRightsReview[]
   assignedLeads Lead[]
   auctionBids  AuctionBid[]
   gmailConnection GmailConnection?
@@ -50,6 +52,8 @@ model Dataset {
   category     String
   description  String
   priceCents   Int
+  monthlyPriceCents Int?
+  annualPriceCents Int?
   qualityScore Int
   licenseType  LicenseType @default(COMMERCIAL)
   sourceCount  Int @default(1)
@@ -59,6 +63,8 @@ model Dataset {
   updatedAt    DateTime @updatedAt
   listings     Listing[]
   orders       Order[]
+  marketplaceSubscriptions MarketplaceSubscription[]
+  rightsReviews DatasetRightsReview[]
   auctions     Auction[]
 }
 
@@ -392,4 +398,43 @@ model EmailSendQuota {
   updatedAt   DateTime @updatedAt
 
   @@index([userId, day])
+}
+
+
+model MarketplaceSubscription {
+  id                       String   @id @default(cuid())
+  buyerId                  String
+  buyer                    User     @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  datasetId                String
+  dataset                  Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  stripeSubscriptionId     String?  @unique
+  stripeCustomerId          String?
+  stripeCheckoutSessionId  String?  @unique
+  billingInterval          String
+  unitAmountCents          Int
+  currency                 String   @default("USD")
+  status                   String   @default("INCOMPLETE")
+  currentPeriodEnd         DateTime?
+  cancelAtPeriodEnd        Boolean  @default(false)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([buyerId, status])
+  @@index([datasetId, status])
+}
+
+
+model DatasetRightsReview {
+  id           String   @id @default(cuid())
+  datasetId    String
+  dataset      Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  sellerId     String
+  seller       User     @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  source       String
+  termsUrl     String
+  evidenceNote String
+  reviewedAt   DateTime @default(now())
+
+  @@index([datasetId, reviewedAt])
+  @@index([sellerId, reviewedAt])
 }

@@ -14,6 +14,8 @@ type Dataset = {
   title: string;
   category: string;
   priceCents: number;
+  monthlyPriceCents?: number | null;
+  annualPriceCents?: number | null;
   qualityScore: number;
   status: string;
   tags: string[];
@@ -412,6 +414,100 @@ function OverviewTab({ user, wallet, formatMoney }: { user?: User | null; wallet
   );
 }
 
+
+
+function NwsRightsReview({ dataset }: { dataset: Dataset }) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const alreadyReviewed = dataset.tags.includes('license-review-status:seller_reviewed');
+  const submit = async () => {
+    if (!confirmed || note.trim().length < 30) {
+      setMessage('Read the NWS terms, check the confirmation, and enter a review note (at least 30 characters).');
+      return;
+    }
+    setSaving(true);
+    setMessage('');
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${API}/datasets/${encodeURIComponent(dataset.id)}/source-rights-review`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token || ''}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmNwsCommercialReuse: true, evidenceNote: note }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Unable to record the review.');
+      setMessage('Seller review saved. Dataset is still a draft and is not for sale.');
+      setConfirmed(false);
+      setNote('');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Unable to record the review.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div style={{ minWidth: 240, display: 'grid', gap: 7 }}>
+      {alreadyReviewed ? <small style={{ color: '#86efac' }}>Seller review recorded</small> : (
+        <>
+          <a href="https://www.weather.gov/documentation/services-web-api" target="_blank" rel="noreferrer">Read NWS API terms</a>
+          <small style={{ color: '#94a3b8' }}>Only NWS-issued point/grid forecasts are in scope. Exclude third-party station observations, imagery, and non-NWS material. Include source attribution, forecast issue/valid times, and the non-endorsement notice.</small>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+            <span>I reviewed the source terms and confirm this dataset contains only permitted NWS forecast material, with required attribution and no third-party content.</span>
+          </label>
+          <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} placeholder="Record what you checked and how third-party content was excluded." style={{ width: '100%', padding: 8 }} />
+          <button type="button" className="secondary-button" disabled={saving} onClick={() => void submit()}>{saving ? 'Saving review…' : 'Record my source-rights review'}</button>
+        </>
+      )}
+      {message && <small role="status">{message}</small>}
+    </div>
+  );
+}
+
+function RecurringPriceEditor({ dataset }: { dataset: Dataset }) {
+  const [monthly, setMonthly] = useState(dataset.monthlyPriceCents ? String(dataset.monthlyPriceCents / 100) : '');
+  const [annual, setAnnual] = useState(dataset.annualPriceCents ? String(dataset.annualPriceCents / 100) : '');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const save = async () => {
+    const parse = (value: string) => value.trim() === '' ? null : Math.round(Number(value) * 100);
+    const monthlyCents = parse(monthly);
+    const annualCents = parse(annual);
+    if ([monthlyCents, annualCents].some((value) => value !== null && (!Number.isInteger(value) || value < 100 || value > 100000000)) ||
+        (monthlyCents === null && annualCents === null)) {
+      setMessage('Enter at least one price of $1 or more.');
+      return;
+    }
+    setSaving(true);
+    setMessage('');
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${API}/datasets/${encodeURIComponent(dataset.id)}/recurring-pricing`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token || ''}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monthlyPriceCents: monthlyCents, annualPriceCents: annualCents }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.formErrors?.[0] || data.error || 'Could not save recurring prices.');
+      setMessage('Saved. Still requires rights review and publication.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not save recurring prices.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div style={{ minWidth: 190, display: 'grid', gap: 6 }}>
+      <input aria-label={`Monthly price for ${dataset.title}`} type="number" min="1" step="0.01" placeholder="Monthly $" value={monthly} onChange={(event) => setMonthly(event.target.value)} style={{ width: '100%', padding: 6 }} />
+      <input aria-label={`Annual price for ${dataset.title}`} type="number" min="1" step="0.01" placeholder="Annual $" value={annual} onChange={(event) => setAnnual(event.target.value)} style={{ width: '100%', padding: 6 }} />
+      <button type="button" className="secondary-button" disabled={saving || !['draft', 'review'].includes(dataset.status.toLowerCase())} onClick={() => void save()}>{saving ? 'Saving…' : 'Save recurring prices'}</button>
+      {message && <small role="status">{message}</small>}
+    </div>
+  );
+}
+
 function DatasetsTab({ formatMoney }: { formatMoney: (cents: number) => string }) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -456,15 +552,19 @@ function DatasetsTab({ formatMoney }: { formatMoney: (cents: number) => string }
       ) : (
         <div className="table-container">
           <table>
-            <thead><tr><th>Title</th><th>Category</th><th>Price</th><th>Quality</th><th>Status</th></tr></thead>
+            <thead><tr><th>Title</th><th>Category</th><th>Price</th><th>Monthly</th><th>Annual</th><th>Quality</th><th>Status</th><th>Recurring prices</th><th>Source-rights review</th></tr></thead>
             <tbody>
               {datasets.map((dataset) => (
                 <tr key={dataset.id}>
                   <td style={{ fontWeight: 600 }}>{dataset.title}</td>
                   <td>{dataset.category}</td>
                   <td>{formatMoney(dataset.priceCents)}</td>
+                  <td>{dataset.monthlyPriceCents ? formatMoney(dataset.monthlyPriceCents) : '—'}</td>
+                  <td>{dataset.annualPriceCents ? formatMoney(dataset.annualPriceCents) : '—'}</td>
                   <td>{dataset.qualityScore}/100</td>
                   <td><span className={`badge ${dataset.status.toLowerCase()}`}>{dataset.status}</span></td>
+                  <td><RecurringPriceEditor dataset={dataset} /></td>
+                  <td>{dataset.tags.includes('source:nws_api_forecasts') ? <NwsRightsReview dataset={dataset} /> : <span style={{ color: '#94a3b8' }}>Separate review required</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -477,6 +577,8 @@ function DatasetsTab({ formatMoney }: { formatMoney: (cents: number) => string }
 
 function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string }) {
   const [orders, setOrders] = useState<Array<{ id: string; datasetTitle: string; totalCents: number; currency: string; status: string; createdAt: string }>>([]);
+  const [subscriptions, setSubscriptions] = useState<Array<{ id: string; datasetTitle: string; amountCents: number; interval: string; status: string; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean }>>([]);
+  const [subscriptionAction, setSubscriptionAction] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloadMessage, setDownloadMessage] = useState('');
@@ -523,13 +625,16 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
     const load = async () => {
       try {
         const token = localStorage.getItem('auth_token');
-        const res = await fetch(`${API}/dashboard/orders`, {
-          headers: { Authorization: `Bearer ${token || ''}` },
-          cache: 'no-store',
-        });
-        const data = await res.json().catch(() => ({}));
+        const [res, subscriptionRes] = await Promise.all([
+          fetch(`${API}/dashboard/orders`, { headers: { Authorization: `Bearer ${token || ''}` }, cache: 'no-store' }),
+          fetch(`${API}/subscriptions`, { headers: { Authorization: `Bearer ${token || ''}` }, cache: 'no-store' }),
+        ]);
+        const [data, subscriptionData] = await Promise.all([res.json().catch(() => ({})), subscriptionRes.json().catch(() => ({}))]);
         if (!res.ok) throw new Error(data.error || 'Unable to load purchases.');
-        if (!cancelled) setOrders(Array.isArray(data.orders) ? data.orders : []);
+        if (!cancelled) {
+          setOrders(Array.isArray(data.orders) ? data.orders : []);
+          setSubscriptions(subscriptionRes.ok && Array.isArray(subscriptionData.subscriptions) ? subscriptionData.subscriptions : []);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load purchases.');
       } finally {
@@ -539,6 +644,50 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
     void load();
     return () => { cancelled = true; };
   }, []);
+
+
+  const manageSubscription = async (subscriptionId: string) => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return setSubscriptionAction('Please sign in again.');
+    setSubscriptionAction('');
+    try {
+      const response = await fetch(`${API}/subscriptions/${encodeURIComponent(subscriptionId)}/portal`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.url !== 'string') throw new Error(data.error || 'Unable to open billing management.');
+      window.location.assign(data.url);
+    } catch (err) {
+      setSubscriptionAction(err instanceof Error ? err.message : 'Unable to open billing management.');
+    }
+  };
+
+  const downloadSubscription = async (subscriptionId: string) => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return setSubscriptionAction('Please sign in again.');
+    setSubscriptionAction('Preparing your subscription dataset…');
+    try {
+      const response = await fetch(`${API}/subscriptions/${encodeURIComponent(subscriptionId)}/download`, {
+        headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Unable to prepare your dataset.');
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'weather-subscription.csv';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setSubscriptionAction('Your subscription dataset download has started.');
+    } catch (err) {
+      setSubscriptionAction(err instanceof Error ? err.message : 'Download failed.');
+    }
+  };
 
   return (
     <div className="card">
@@ -572,6 +721,34 @@ function PurchasesTab({ formatMoney }: { formatMoney: (cents: number) => string 
           </table>
         </div>
       )}
+
+      <div style={{ marginTop: 28 }}>
+        <h3 className="card-title">Recurring subscriptions</h3>
+        {subscriptionAction && <p role="status" style={{ color: '#94a3b8' }}>{subscriptionAction}</p>}
+        {subscriptions.length === 0 ? (
+          <p className="live-empty">No recurring subscriptions are active or recorded for this account.</p>
+        ) : (
+          <div className="table-container">
+            <table>
+              <thead><tr><th>Dataset</th><th>Price</th><th>Status</th><th>Current period ends</th><th>Actions</th></tr></thead>
+              <tbody>
+                {subscriptions.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.datasetTitle}</td>
+                    <td>{formatMoney(item.amountCents)} / {item.interval === 'year' ? 'year' : 'month'}</td>
+                    <td><span className={`badge ${item.status}`}>{item.status}</span>{item.cancelAtPeriodEnd ? ' · Cancels at period end' : ''}</td>
+                    <td>{item.currentPeriodEnd ? new Date(item.currentPeriodEnd).toLocaleDateString() : 'Pending confirmation'}</td>
+                    <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {['active', 'trialing'].includes(item.status) && <button className="primary-button" type="button" onClick={() => void downloadSubscription(item.id)}>Download</button>}
+                      <button className="secondary-button" type="button" onClick={() => void manageSubscription(item.id)}>Manage / cancel</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -20,6 +20,7 @@ import { createAiResearchAgentRouter } from './routes/ai-research-agent';
 import { createOperationsRouter } from './routes/operations';
 import { createAuctionsRouter } from './routes/auctions';
 import { createGmailRouter } from './routes/gmail';
+import { createSubscriptionsRouter, processSubscriptionWebhook } from './routes/subscriptions';
 import { finishAgentTask, startAgentTask } from './services/agent-activity';
 import { upsertResearchRecordPreservingAnalysis } from './services/research-records';
 import { isApprovedNwsForecastRecord, isCommercialReuseApproved } from './services/source-rights';
@@ -116,6 +117,8 @@ const serializeDataset = (dataset: {
   category: string;
   description: string;
   priceCents: number;
+  monthlyPriceCents: number | null;
+  annualPriceCents: number | null;
   qualityScore: number;
   licenseType: string;
   sourceCount: number;
@@ -130,6 +133,8 @@ const serializeDataset = (dataset: {
   category: dataset.category,
   description: dataset.description,
   priceCents: dataset.priceCents,
+  monthlyPriceCents: dataset.monthlyPriceCents,
+  annualPriceCents: dataset.annualPriceCents,
   qualityScore: dataset.qualityScore,
   licenseType: dataset.licenseType.toLowerCase(),
   sourceCount: dataset.sourceCount,
@@ -218,6 +223,7 @@ app.use('/agents', createAgentsRouter(prisma, requireAuth));
 app.use('/operations', createOperationsRouter(prisma, requireAuth));
 app.use('/auctions', createAuctionsRouter(prisma, requireAuth));
 app.use('/gmail', createGmailRouter(prisma, requireAuth));
+app.use('/subscriptions', createSubscriptionsRouter(prisma, requireAuth, () => stripeClient()));
 
 const registerSchema = z.object({
   name: z.string().min(2),
@@ -231,6 +237,8 @@ const datasetSchema = z.object({
   category: z.string().min(2),
   description: z.string().min(20),
   priceCents: z.number().int().positive(),
+  monthlyPriceCents: z.number().int().min(100).max(100000000).optional().nullable(),
+  annualPriceCents: z.number().int().min(100).max(100000000).optional().nullable(),
   qualityScore: z.number().int().min(0).max(100),
   licenseType: z
     .enum(['commercial', 'personal', 'enterprise', 'restricted'])
@@ -755,6 +763,101 @@ app.get('/datasets/:id', async (req, res) => {
   return res.json({ dataset: serializeDataset(dataset) });
 });
 
+
+
+const nwsRightsReviewSchema = z.object({
+  confirmNwsCommercialReuse: z.literal(true),
+  evidenceNote: z.string().trim().min(30).max(1500),
+});
+
+app.post('/datasets/:id/source-rights-review', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
+  const parsed = nwsRightsReviewSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Confirm the source terms and provide a review note of at least 30 characters.' });
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  try {
+    const dataset = await prisma.dataset.findUnique({ where: { id: String(req.params.id) } });
+    if (!dataset) return res.status(404).json({ error: 'Dataset not found.' });
+    if (user.role !== 'admin' && dataset.sellerId !== user.id) return res.status(403).json({ error: 'Only the dataset owner can record this review.' });
+    if (!['DRAFT', 'REVIEW'].includes(dataset.status)) return res.status(409).json({ error: 'Source rights can only be reviewed before publication.' });
+
+    const sources = dataset.tags.filter((tag) => tag.startsWith('source:')).map((tag) => tag.slice('source:'.length));
+    const recordIds = dataset.tags.filter((tag) => tag.startsWith('source-record-id:')).map((tag) => tag.slice('source-record-id:'.length));
+    if (sources.length !== 1 || sources[0] !== 'nws_api_forecasts' || !isCommercialReuseApproved('nws_api_forecasts')) {
+      return res.status(409).json({ error: 'This review flow is limited to NWS point/grid forecasts. Other sources remain blocked pending separate review.' });
+    }
+    if (!recordIds.length || new Set(recordIds).size !== recordIds.length) return res.status(409).json({ error: 'The dataset must contain unique attached NWS forecast records.' });
+    const records = await prisma.supplierResearchRecord.findMany({
+      where: { id: { in: recordIds }, source: 'nws_api_forecasts' },
+      select: { id: true, sourceUrl: true, payload: true },
+    });
+    if (records.length !== recordIds.length || records.some((record) => !isApprovedNwsForecastRecord(record))) {
+      return res.status(409).json({ error: 'Every attached record must pass the approved NWS forecast validation before review can be recorded.' });
+    }
+    const review = await prisma.$transaction(async (tx) => {
+      const created = await tx.datasetRightsReview.create({
+        data: {
+          datasetId: dataset.id,
+          sellerId: user.id,
+          source: 'nws_api_forecasts',
+          termsUrl: 'https://www.weather.gov/documentation/services-web-api',
+          evidenceNote: parsed.data.evidenceNote,
+        },
+      });
+      const tags = dataset.tags.filter((tag) =>
+        !tag.startsWith('license-review-status:') &&
+        !tag.startsWith('license-review-evidence:') &&
+        !tag.startsWith('license-review-source:') &&
+        !tag.startsWith('license-review-terms:') &&
+        tag !== 'license:review-required' &&
+        tag !== 'rights-review:pending'
+      );
+      await tx.dataset.update({
+        where: { id: dataset.id },
+        data: {
+          licenseType: 'COMMERCIAL',
+          tags: [...tags, 'license-review-status:seller_reviewed', `license-review-evidence:${created.id}`, 'license-review-source:nws_api_forecasts', 'license-review-terms:https://www.weather.gov/documentation/services-web-api'],
+        },
+      });
+      return created;
+    });
+    return res.status(201).json({
+      reviewId: review.id,
+      reviewedAt: review.reviewedAt.toISOString(),
+      note: 'Seller attestation recorded. The dataset remains a draft and is not published or offered for sale.',
+    });
+  } catch (error) {
+    console.error('NWS source-rights review failed', error);
+    return res.status(500).json({ error: 'Unable to save the source-rights review.' });
+  }
+});
+
+app.patch('/datasets/:id/recurring-pricing', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
+  const parsed = z.object({
+    monthlyPriceCents: z.number().int().min(100).max(100000000).nullable(),
+    annualPriceCents: z.number().int().min(100).max(100000000).nullable(),
+  }).refine((value) => value.monthlyPriceCents !== null || value.annualPriceCents !== null, {
+    message: 'Set at least one recurring price.',
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  try {
+    const dataset = await prisma.dataset.findUnique({ where: { id: String(req.params.id) } });
+    if (!dataset) return res.status(404).json({ error: 'Dataset not found.' });
+    if (user.role !== 'admin' && dataset.sellerId !== user.id) return res.status(403).json({ error: 'You can only set prices for your own dataset.' });
+    if (dataset.status !== 'DRAFT' && dataset.status !== 'REVIEW') return res.status(409).json({ error: 'Recurring prices can only be changed while the dataset is a draft or under review.' });
+    const updated = await prisma.dataset.update({
+      where: { id: dataset.id },
+      data: { monthlyPriceCents: parsed.data.monthlyPriceCents, annualPriceCents: parsed.data.annualPriceCents },
+    });
+    return res.json({ dataset: serializeDataset(updated), note: 'Recurring prices saved. This does not publish the dataset or approve source rights.' });
+  } catch (error) {
+    console.error('Recurring price update failed', error);
+    return res.status(500).json({ error: 'Unable to save recurring prices.' });
+  }
+});
+
 app.post('/datasets', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
   const parsed = datasetSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -771,6 +874,8 @@ app.post('/datasets', requireAuth, requireRole(['seller', 'admin']), async (req,
       category: parsed.data.category,
       description: parsed.data.description,
       priceCents: 0,
+      monthlyPriceCents: parsed.data.monthlyPriceCents ?? null,
+      annualPriceCents: parsed.data.annualPriceCents ?? null,
       qualityScore: parsed.data.qualityScore,
       licenseType: 'RESTRICTED',
       sourceCount: parsed.data.sourceCount,
@@ -1209,6 +1314,10 @@ app.post('/webhooks/stripe', async (req, res) => {
   }
 
   try {
+    if (event.type.startsWith('customer.subscription.') || event.type === 'invoice.paid' || event.type === 'invoice.payment_failed' || (event.type === 'checkout.session.completed' && (event.data.object as Stripe.Checkout.Session).mode === 'subscription')) {
+      await processSubscriptionWebhook(prisma, stripe, event);
+      return res.json({ received: true });
+    }
     const session = event.data.object as Stripe.Checkout.Session;
     if ([
       'checkout.session.completed',

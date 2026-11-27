@@ -10,6 +10,8 @@ type Dataset = {
   category: string;
   description: string;
   priceCents: number;
+  monthlyPriceCents?: number | null;
+  annualPriceCents?: number | null;
   qualityScore: number;
   licenseType: string;
   sourceCount: number;
@@ -34,6 +36,7 @@ export default function HomePage() {
   const [dataError, setDataError] = useState<string | null>(null);
   const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState('');
+  const [subscriptionLoading, setSubscriptionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -90,6 +93,33 @@ export default function HomePage() {
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : 'Unable to start checkout.');
       setCheckoutLoadingId(null);
+    }
+  };
+
+
+  const startSubscription = async (datasetId: string, interval: 'month' | 'year') => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      window.location.href = '/login?next=/';
+      return;
+    }
+    const key = `${datasetId}:${interval}`;
+    setSubscriptionLoading(key);
+    setCheckoutError('');
+    try {
+      const response = await fetch(`${API}/subscriptions/checkout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ datasetId, interval }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.checkoutUrl !== 'string') {
+        throw new Error(data.error || 'Recurring checkout is not available for this listing.');
+      }
+      window.location.assign(data.checkoutUrl);
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : 'Unable to start subscription checkout.');
+      setSubscriptionLoading(null);
     }
   };
 
@@ -219,6 +249,22 @@ export default function HomePage() {
                     {!overview?.paymentProcessingEnabled ? 'Checkout disabled' : checkoutLoadingId === dataset.id ? 'Opening secure checkout…' : 'Buy securely'}
                   </button>
                 )}
+                {dataset.tags.includes('factory:v1') && dataset.status === 'published' && dataset.licenseType !== 'restricted' &&
+                  (dataset.monthlyPriceCents || dataset.annualPriceCents) && (
+                    <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+                      <small style={{ color: '#94a3b8' }}>Recurring access</small>
+                      {dataset.monthlyPriceCents && (
+                        <button className="secondary-button" type="button" onClick={() => void startSubscription(dataset.id, 'month')} disabled={!overview?.paymentProcessingEnabled || subscriptionLoading === `${dataset.id}:month`}>
+                          {subscriptionLoading === `${dataset.id}:month` ? 'Opening…' : `Subscribe monthly · ${formatMoney(dataset.monthlyPriceCents)}/mo`}
+                        </button>
+                      )}
+                      {dataset.annualPriceCents && (
+                        <button className="secondary-button" type="button" onClick={() => void startSubscription(dataset.id, 'year')} disabled={!overview?.paymentProcessingEnabled || subscriptionLoading === `${dataset.id}:year`}>
+                          {subscriptionLoading === `${dataset.id}:year` ? 'Opening…' : `Subscribe annually · ${formatMoney(dataset.annualPriceCents)}/yr`}
+                        </button>
+                      )}
+                    </div>
+                  )}
               </article>
             ))}
           </div>
