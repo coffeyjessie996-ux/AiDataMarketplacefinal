@@ -489,11 +489,16 @@ export function createCronRouter(prisma: PrismaClient) {
 
   // Daily, safely reconcile agent runs that have been stuck for over two hours.
   // This never reruns a scraper or touches marketplace/customer/payment data.
-  router.get('/maintenance/reconcile', async (req, res) => {
+  router.get('/maintenance/reconcile', (req, res, next) => {
+    if (!allowMaintenanceRequest(req.ip ?? 'unknown')) {
+      res.setHeader('Retry-After', '900');
+      return res.status(429).json({ error: 'Maintenance request rate limit exceeded. Try again later.' });
+    }
+    next();
+  }, async (req, res) => {
     const secret = process.env.CRON_SECRET;
     if (!secret) return res.status(503).json({ error: 'Scheduled maintenance is not configured: CRON_SECRET is missing.' });
     if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized maintenance request.' });
-    if (!allowMaintenanceRequest(req.ip ?? 'unknown')) return res.status(429).json({ error: 'Maintenance request rate limit exceeded. Try again later.' });
     try {
       const result = await reconcileStaleAgentTasks(prisma);
       return res.json({ ok: true, team: 'Marketplace Maintenance Team', ...result });
