@@ -11,7 +11,7 @@ test('maintenance only reconciles stale RUNNING tasks and does not replay source
   assert.match(service, /status: 'RUNNING'/);
   assert.match(service, /STALE_AGENT_TASK_MINUTES = 120/);
   assert.match(service, /status: 'FAILED'/);
-  assert.match(service, /does not rerun collectors or modify marketplace\/customer\/payment data/);
+  assert.match(service, /did not rerun collectors or modify marketplace\/customer\/payment data/);
   assert.doesNotMatch(service, /fetch\(|stripe|supplierResearchRecord\.delete/);
 });
 
