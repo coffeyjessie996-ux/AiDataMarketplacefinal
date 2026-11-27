@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { finishAgentTask, startAgentTask } from '../services/agent-activity';
+import { reconcileStaleAgentTasks } from '../services/maintenance';
 import { upsertResearchRecordPreservingAnalysis } from '../services/research-records';
 
 const SOURCE_URL = 'https://api.usaspending.gov/api/v2/search/spending_by_award/';
@@ -17,6 +18,27 @@ function authorized(requestHeader: string | undefined, secret: string): boolean 
 // The bearer secret remains the primary access control; this limits repeated requests
 // handled by the same warm instance without relying on client-supplied identity headers.
 const samOpportunityRequestWindows = new Map<string, { startedAt: number; count: number }>();
+
+// Per-instance rate limit for the maintenance cron route. CRON_SECRET remains
+// the authentication control; this additionally caps repeated requests per IP.
+const maintenanceRequestWindows = new Map<string, { startedAt: number; count: number }>();
+
+function allowMaintenanceRequest(ip: string, now = Date.now()): boolean {
+  const windowMs = 15 * 60 * 1000;
+  const maxRequests = 3;
+  for (const [entryIp, window] of maintenanceRequestWindows) {
+    if (now - window.startedAt >= windowMs) maintenanceRequestWindows.delete(entryIp);
+  }
+  const current = maintenanceRequestWindows.get(ip);
+  if (!current || now - current.startedAt >= windowMs) {
+    if (maintenanceRequestWindows.size >= 500) maintenanceRequestWindows.clear();
+    maintenanceRequestWindows.set(ip, { startedAt: now, count: 1 });
+    return true;
+  }
+  if (current.count >= maxRequests) return false;
+  current.count += 1;
+  return true;
+}
 
 function safeSamResponseMessage(body: string, apiKey: string): string {
   return body
@@ -461,6 +483,28 @@ export function createCronRouter(prisma: PrismaClient) {
       await finishAgentTask(prisma, taskId, 'FAILED', { message: 'Grants.gov collection failed before completion.' });
       console.error('Scheduled Grants.gov refresh failed', error);
       return res.status(502).json({ error: 'Scheduled Grants.gov opportunity refresh failed.' });
+    }
+  });
+
+
+  // Daily, safely reconcile agent runs that have been stuck for over two hours.
+  // This never reruns a scraper or touches marketplace/customer/payment data.
+  router.get('/maintenance/reconcile', (req, res, next) => {
+    if (!allowMaintenanceRequest(req.ip ?? 'unknown')) {
+      res.setHeader('Retry-After', '900');
+      return res.status(429).json({ error: 'Maintenance request rate limit exceeded. Try again later.' });
+    }
+    next();
+  }, async (req, res) => {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(503).json({ error: 'Scheduled maintenance is not configured: CRON_SECRET is missing.' });
+    if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized maintenance request.' });
+    try {
+      const result = await reconcileStaleAgentTasks(prisma);
+      return res.json({ ok: true, team: 'Marketplace Maintenance Team', ...result });
+    } catch (error) {
+      console.error('Scheduled maintenance reconciliation failed', error);
+      return res.status(500).json({ error: 'Scheduled maintenance reconciliation failed safely.' });
     }
   });
 

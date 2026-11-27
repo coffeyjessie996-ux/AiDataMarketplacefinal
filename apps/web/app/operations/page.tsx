@@ -5,6 +5,8 @@ import './operations.css';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
+type Maintenance = { checkedAt: string; policy: { staleTaskThresholdMinutes: number; automaticRepair: string; approvalRequiredFor: string[] }; incidents: { staleRunningTasks: number; failedTasksLast24Hours: number }; failureDiagnostics: { windowHours: number; inspectedFailureCount: number; categories: Record<string, number>; recentFailures: Array<{ id: string; agentName: string; taskName: string; message: string; category: string; recommendedAction: string; startedAt: string }> }; recentRepairs: Array<{ id: string; taskName: string; status: string; message: string; startedAt: string; completedAt: string | null; recordsFetched: number }> };
+
 type Health = {
   updatedAt: string;
   thresholds: { staleAfterHours: number; taskWindowHours: number };
@@ -18,6 +20,9 @@ const statusClass = (value: string) => value === 'COMPLETED' || value === 'fresh
 
 export default function OperationsPage() {
   const [health, setHealth] = useState<Health | null>(null);
+  const [maintenance, setMaintenance] = useState<Maintenance | null>(null);
+  const [repairing, setRepairing] = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -29,6 +34,9 @@ export default function OperationsPage() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Could not load operations health.');
       setHealth(data);
+      const maintenanceResponse = await fetch(`${API}/maintenance/status`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+      const maintenanceData = await maintenanceResponse.json().catch(() => ({}));
+      if (maintenanceResponse.ok) setMaintenance(maintenanceData);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load operations health.');
@@ -37,6 +45,23 @@ export default function OperationsPage() {
     }
   }
 
+  async function runMaintenance() {
+    try {
+      setRepairing(true);
+      setMaintenanceMessage('');
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('Please sign in first.');
+      const response = await fetch(`${API}/maintenance/run`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Maintenance run failed.');
+      setMaintenanceMessage(data.staleTasksReconciled > 0 ? `Maintenance safely reconciled ${data.staleTasksReconciled} stuck task(s).` : 'Maintenance check complete. No repair was needed.');
+      await load();
+    } catch (err) {
+      setMaintenanceMessage(err instanceof Error ? err.message : 'Maintenance run failed.');
+    } finally {
+      setRepairing(false);
+    }
+  }
   useEffect(() => { void load(); }, []);
 
   return (
@@ -57,6 +82,30 @@ export default function OperationsPage() {
             <Metric label="Agent failures · 24h" value={health.agents.failedLast24Hours} detail="Recorded FAILED task runs" alert={health.agents.failedLast24Hours > 0} />
             <Metric label="Failed orders · 24h" value={health.payments.failedOrdersLast24Hours} detail="Application order records" alert={health.payments.failedOrdersLast24Hours > 0} />
             <Metric label="Failed wallet transactions · 24h" value={health.payments.failedWalletTransactionsLast24Hours} detail="Application ledger records" alert={health.payments.failedWalletTransactionsLast24Hours > 0} />
+          </section>
+          <section className="mt-7 rounded-xl border border-cyan-900 bg-slate-900 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div><h2 className="text-xl font-semibold">AI Maintenance Team</h2><p className="mt-1 text-sm text-slate-400">Scheduled daily checks plus an admin-triggered check. Safe repair scope only.</p></div>
+              <button disabled={repairing} onClick={() => void runMaintenance()} className="rounded-lg bg-cyan-600 px-4 py-2 font-semibold disabled:opacity-50">{repairing ? 'Checking…' : 'Run maintenance check'}</button>
+            </div>
+            {maintenanceMessage && <p role="status" className="mt-3 text-sm text-cyan-200">{maintenanceMessage}</p>}
+            {maintenance ? <>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <Metric label="Stuck tasks detected" value={maintenance.incidents.staleRunningTasks} detail={`Older than ${maintenance.policy.staleTaskThresholdMinutes} minutes`} alert={maintenance.incidents.staleRunningTasks > 0} />
+                <Metric label="Failed agent tasks · 24h" value={maintenance.incidents.failedTasksLast24Hours} detail="Recorded failures; not all require repair" alert={maintenance.incidents.failedTasksLast24Hours > 0} />
+                <Metric label="Maintenance actions" value={maintenance.recentRepairs.length} detail="Recent recorded maintenance runs" />
+              </div>
+              <p className="mt-3 text-xs text-slate-400">{maintenance.policy.automaticRepair}</p>
+              <div className="mt-5">
+                <h3 className="mb-2 font-semibold">Investigator · failure patterns ({maintenance.failureDiagnostics.windowHours}h)</h3>
+                <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                  {Object.entries(maintenance.failureDiagnostics.categories).map(([category, count]) => <div key={category} className="rounded-lg border border-slate-800 p-3"><p className="text-xs capitalize text-slate-400">{category.replaceAll('_', ' ')}</p><p className="text-xl font-semibold">{count}</p></div>)}
+                </div>
+                {maintenance.failureDiagnostics.recentFailures.length > 0 ? <div className="mt-3 space-y-3">{maintenance.failureDiagnostics.recentFailures.slice(0,8).map(failure => <article key={failure.id} className="rounded-lg border border-slate-800 p-3"><p className="text-sm font-medium">{failure.agentName} · {failure.category.replaceAll('_', ' ')}</p><p className="text-xs text-slate-400">{failure.taskName} · {date(failure.startedAt)}</p><p className="mt-1 text-sm text-slate-300">{failure.message}</p><p className="mt-1 text-xs text-cyan-200">Suggested next step: {failure.recommendedAction}</p></article>)}</div> : <p className="mt-3 text-sm text-slate-400">No failed agent runs found in this window.</p>}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">Approval remains required for: {maintenance.policy.approvalRequiredFor.join(', ')}.</p>
+              {maintenance.recentRepairs.length > 0 && <div className="mt-4 space-y-2">{maintenance.recentRepairs.slice(0,5).map(run => <article key={run.id} className="border-b border-slate-800 pb-2"><p className="text-sm font-medium">{run.taskName} · {run.status}</p><p className="text-xs text-slate-400">{date(run.startedAt)} · {run.message}</p></article>)}</div>}
+            </> : <p className="mt-4 text-sm text-slate-400">Maintenance status is unavailable for this account.</p>}
           </section>
           <section className="mt-7 rounded-xl border border-slate-800 bg-slate-900 p-5">
             <h2 className="mb-3 text-xl font-semibold">Research freshness</h2>
