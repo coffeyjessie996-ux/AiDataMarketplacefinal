@@ -85,7 +85,7 @@ export default function OperationsPage() {
           </section>
           <section className="mt-7 rounded-xl border border-cyan-900 bg-slate-900 p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><h2 className="text-xl font-semibold">AI Maintenance Team</h2><p className="mt-1 text-sm text-slate-400">Automatic checks run every 15 minutes. Safe repair scope only.</p></div>
+              <div><h2 className="text-xl font-semibold">AI Maintenance Team</h2><p className="mt-1 text-sm text-slate-400">Scheduled daily checks plus an admin-triggered check. Safe repair scope only.</p></div>
               <button disabled={repairing} onClick={() => void runMaintenance()} className="rounded-lg bg-cyan-600 px-4 py-2 font-semibold disabled:opacity-50">{repairing ? 'Checking…' : 'Run maintenance check'}</button>
             </div>
             {maintenanceMessage && <p role="status" className="mt-3 text-sm text-cyan-200">{maintenanceMessage}</p>}
