@@ -19,6 +19,27 @@ function authorized(requestHeader: string | undefined, secret: string): boolean 
 // handled by the same warm instance without relying on client-supplied identity headers.
 const samOpportunityRequestWindows = new Map<string, { startedAt: number; count: number }>();
 
+// Per-instance rate limit for the maintenance cron route. CRON_SECRET remains
+// the authentication control; this additionally caps repeated requests per IP.
+const maintenanceRequestWindows = new Map<string, { startedAt: number; count: number }>();
+
+function allowMaintenanceRequest(ip: string, now = Date.now()): boolean {
+  const windowMs = 15 * 60 * 1000;
+  const maxRequests = 3;
+  for (const [entryIp, window] of maintenanceRequestWindows) {
+    if (now - window.startedAt >= windowMs) maintenanceRequestWindows.delete(entryIp);
+  }
+  const current = maintenanceRequestWindows.get(ip);
+  if (!current || now - current.startedAt >= windowMs) {
+    if (maintenanceRequestWindows.size >= 500) maintenanceRequestWindows.clear();
+    maintenanceRequestWindows.set(ip, { startedAt: now, count: 1 });
+    return true;
+  }
+  if (current.count >= maxRequests) return false;
+  current.count += 1;
+  return true;
+}
+
 function safeSamResponseMessage(body: string, apiKey: string): string {
   return body
     .replaceAll(apiKey, '[redacted]')
@@ -472,6 +493,7 @@ export function createCronRouter(prisma: PrismaClient) {
     const secret = process.env.CRON_SECRET;
     if (!secret) return res.status(503).json({ error: 'Scheduled maintenance is not configured: CRON_SECRET is missing.' });
     if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized maintenance request.' });
+    if (!allowMaintenanceRequest(req.ip)) return res.status(429).json({ error: 'Maintenance request rate limit exceeded. Try again later.' });
     try {
       const result = await reconcileStaleAgentTasks(prisma);
       return res.json({ ok: true, team: 'Marketplace Maintenance Team', ...result });
