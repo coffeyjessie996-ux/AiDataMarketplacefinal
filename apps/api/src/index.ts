@@ -764,6 +764,74 @@ app.get('/datasets/:id', async (req, res) => {
 });
 
 
+
+const nwsRightsReviewSchema = z.object({
+  confirmNwsCommercialReuse: z.literal(true),
+  evidenceNote: z.string().trim().min(30).max(1500),
+});
+
+app.post('/datasets/:id/source-rights-review', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
+  const parsed = nwsRightsReviewSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Confirm the source terms and provide a review note of at least 30 characters.' });
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  try {
+    const dataset = await prisma.dataset.findUnique({ where: { id: String(req.params.id) } });
+    if (!dataset) return res.status(404).json({ error: 'Dataset not found.' });
+    if (user.role !== 'admin' && dataset.sellerId !== user.id) return res.status(403).json({ error: 'Only the dataset owner can record this review.' });
+    if (!['DRAFT', 'REVIEW'].includes(dataset.status)) return res.status(409).json({ error: 'Source rights can only be reviewed before publication.' });
+
+    const sources = dataset.tags.filter((tag) => tag.startsWith('source:')).map((tag) => tag.slice('source:'.length));
+    const recordIds = dataset.tags.filter((tag) => tag.startsWith('source-record-id:')).map((tag) => tag.slice('source-record-id:'.length));
+    if (sources.length !== 1 || sources[0] !== 'nws_api_forecasts' || !isCommercialReuseApproved('nws_api_forecasts')) {
+      return res.status(409).json({ error: 'This review flow is limited to NWS point/grid forecasts. Other sources remain blocked pending separate review.' });
+    }
+    if (!recordIds.length || new Set(recordIds).size !== recordIds.length) return res.status(409).json({ error: 'The dataset must contain unique attached NWS forecast records.' });
+    const records = await prisma.supplierResearchRecord.findMany({
+      where: { id: { in: recordIds }, source: 'nws_api_forecasts' },
+      select: { id: true, sourceUrl: true, payload: true },
+    });
+    if (records.length !== recordIds.length || records.some((record) => !isApprovedNwsForecastRecord(record))) {
+      return res.status(409).json({ error: 'Every attached record must pass the approved NWS forecast validation before review can be recorded.' });
+    }
+    const review = await prisma.$transaction(async (tx) => {
+      const created = await tx.datasetRightsReview.create({
+        data: {
+          datasetId: dataset.id,
+          sellerId: user.id,
+          source: 'nws_api_forecasts',
+          termsUrl: 'https://www.weather.gov/documentation/services-web-api',
+          evidenceNote: parsed.data.evidenceNote,
+        },
+      });
+      const tags = dataset.tags.filter((tag) =>
+        !tag.startsWith('license-review-status:') &&
+        !tag.startsWith('license-review-evidence:') &&
+        !tag.startsWith('license-review-source:') &&
+        !tag.startsWith('license-review-terms:') &&
+        tag !== 'license:review-required' &&
+        tag !== 'rights-review:pending'
+      );
+      await tx.dataset.update({
+        where: { id: dataset.id },
+        data: {
+          licenseType: 'COMMERCIAL',
+          tags: [...tags, 'license-review-status:seller_reviewed', `license-review-evidence:${created.id}`, 'license-review-source:nws_api_forecasts', 'license-review-terms:https://www.weather.gov/documentation/services-web-api'],
+        },
+      });
+      return created;
+    });
+    return res.status(201).json({
+      reviewId: review.id,
+      reviewedAt: review.reviewedAt.toISOString(),
+      note: 'Seller attestation recorded. The dataset remains a draft and is not published or offered for sale.',
+    });
+  } catch (error) {
+    console.error('NWS source-rights review failed', error);
+    return res.status(500).json({ error: 'Unable to save the source-rights review.' });
+  }
+});
+
 app.patch('/datasets/:id/recurring-pricing', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
   const parsed = z.object({
     monthlyPriceCents: z.number().int().min(100).max(100000000).nullable(),
