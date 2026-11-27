@@ -206,20 +206,88 @@ export function createSubscriptionsRouter(
         orderBy: [{ retrievedAt: 'desc' }, { sourceRecordId: 'asc' }],
       });
       if (records.length !== ids.length || records.some((record) => !isApprovedNwsForecastRecord(record))) {
-        return res.status(409).json({ error: 'Approved forecast records are not available for delivery.' });
+        return res.status(409).json({ error: 'Approved NWS source records are not available for delivery.' });
       }
-      const columns = ['location', 'title', 'startTime', 'endTime', 'forecastUpdatedAt', 'temperature', 'temperatureUnit', 'shortForecast', 'windSpeed', 'windDirection', 'precipitationChance'];
+
+      // Saved records establish the seller-reviewed location and source scope only.
+      // Each subscriber download retrieves a fresh forecast from the official NWS API.
+      const anchor = records[0].payload as Record<string, unknown>;
+      const latitude = Number(anchor.latitude);
+      const longitude = Number(anchor.longitude);
+      const location = typeof anchor.location === 'string' ? anchor.location.trim() : '';
+      if (!location || !Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+          latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 ||
+          records.some((record) => {
+            const payload = record.payload as Record<string, unknown>;
+            return Number(payload.latitude) !== latitude || Number(payload.longitude) !== longitude ||
+              payload.location !== location;
+          })) {
+        return res.status(409).json({ error: 'The reviewed forecast records do not identify one consistent delivery location.' });
+      }
+
+      const headers = {
+        accept: 'application/geo+json',
+        'user-agent': 'AI-Data-Marketplace/1.0 (+https://aidatamarketplacefinal.vercel.app)',
+      };
+      const pointResponse = await fetch(`https://api.weather.gov/points/${latitude},${longitude}`, {
+        headers, signal: AbortSignal.timeout(10000),
+      });
+      if (!pointResponse.ok) return res.status(502).json({ error: 'The National Weather Service location service is temporarily unavailable.' });
+      const pointPayload = await pointResponse.json() as { properties?: { forecast?: string } };
+      const forecastUrl = pointPayload.properties?.forecast;
+      if (!forecastUrl) return res.status(502).json({ error: 'No current official forecast is available for this subscription location.' });
+      const validatedUrl = new URL(forecastUrl);
+      if (validatedUrl.protocol !== 'https:' || validatedUrl.hostname !== 'api.weather.gov' ||
+          !/^\/gridpoints\/[A-Z0-9]+\/\d+,\d+\/forecast$/i.test(validatedUrl.pathname)) {
+        return res.status(502).json({ error: 'The NWS service returned an unexpected forecast source.' });
+      }
+
+      const forecastResponse = await fetch(validatedUrl.toString(), {
+        headers, signal: AbortSignal.timeout(10000),
+      });
+      if (!forecastResponse.ok) return res.status(502).json({ error: 'The current National Weather Service forecast is temporarily unavailable.' });
+      const forecastPayload = await forecastResponse.json() as {
+        properties?: { updateTime?: string; periods?: Array<Record<string, unknown>> };
+      };
+      const retrievedAt = new Date().toISOString();
+      const periods = (forecastPayload.properties?.periods ?? []).slice(0, 14).filter((period) =>
+        typeof period.startTime === 'string' && !Number.isNaN(Date.parse(period.startTime)) &&
+        typeof period.endTime === 'string' && !Number.isNaN(Date.parse(period.endTime))
+      );
+      if (!periods.length) return res.status(502).json({ error: 'The NWS service returned no usable forecast periods.' });
+
+      const columns = ['location', 'title', 'startTime', 'endTime', 'forecastUpdatedAt', 'retrievedAt', 'temperature', 'temperatureUnit', 'shortForecast', 'detailedForecast', 'windSpeed', 'windDirection', 'precipitationChance', 'sourceUrl', 'attribution'];
       const cell = (value: unknown) => {
         let text = value === null || value === undefined ? '' : String(value);
         if (/^[=+@\-\t\r]/.test(text)) text = `'${text}`;
         return `"${text.replace(/"/g, '""')}"`;
       };
-      const lines = [columns.join(','), ...records.map((record) => {
-        const payload = record.payload as Record<string, unknown>;
-        return columns.map((key) => cell(payload[key])).join(',');
+      const lines = [columns.join(','), ...periods.map((period) => {
+        const precipitation = period.probabilityOfPrecipitation && typeof period.probabilityOfPrecipitation === 'object'
+          ? (period.probabilityOfPrecipitation as Record<string, unknown>).value ?? null
+          : null;
+        const row: Record<string, unknown> = {
+          location,
+          title: period.name ?? 'Forecast period',
+          startTime: period.startTime,
+          endTime: period.endTime,
+          forecastUpdatedAt: forecastPayload.properties?.updateTime ?? '',
+          retrievedAt,
+          temperature: period.temperature ?? '',
+          temperatureUnit: period.temperatureUnit ?? 'F',
+          shortForecast: period.shortForecast ?? '',
+          detailedForecast: period.detailedForecast ?? '',
+          windSpeed: period.windSpeed ?? '',
+          windDirection: period.windDirection ?? '',
+          precipitationChance: precipitation,
+          sourceUrl: validatedUrl.toString(),
+          attribution: 'National Weather Service (NWS), api.weather.gov. Public-domain government data; no NOAA/NWS endorsement.',
+        };
+        return columns.map((key) => cell(row[key])).join(',');
       })];
+      res.setHeader('Cache-Control', 'private, max-age=300');
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="weather-subscription-${item.id}.csv"`);
+      res.setHeader('Content-Disposition', `attachment; filename="current-weather-subscription-${item.id}.csv"`);
       return res.send(lines.join('\r\n'));
     } catch (error) {
       console.error('Subscription download failed', error);
