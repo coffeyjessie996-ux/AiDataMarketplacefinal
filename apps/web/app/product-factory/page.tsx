@@ -326,7 +326,9 @@ export default function ProductFactoryPage() {
                       <p style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.5 }}>Only publish after you have checked the source terms and confirmed you have the rights to offer this dataset. Your confirmation is recorded with the listing.</p>
                       {(() => {
                         const publishDraft = publishDrafts[item.id] ?? {
-                          priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : item.sellerRightsAttestationNote.includes('$4.99') ? '4.99' : '',
+                          priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : '',
+                          monthlyPriceUsd: item.monthlyPriceCents ? (item.monthlyPriceCents / 100).toFixed(2) : '',
+                          annualPriceUsd: item.annualPriceCents ? (item.annualPriceCents / 100).toFixed(2) : '',
                           licenseType: defaultPublishLicense(item),
                           rightsConfirmed: item.sellerRightsConfirmed,
                           attestationNote: item.sellerRightsAttestationNote,
