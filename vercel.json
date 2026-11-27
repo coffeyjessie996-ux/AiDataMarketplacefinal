@@ -45,7 +45,7 @@
     },
     {
       "path": "/api/cron/maintenance/reconcile",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 1 * * *"
     }
   ]
 }
