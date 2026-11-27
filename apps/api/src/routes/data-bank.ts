@@ -360,7 +360,8 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
         take: 100,
         select: {
           id: true, title: true, category: true, qualityScore: true,
-          sourceCount: true, status: true, licenseType: true, priceCents: true, createdAt: true,
+          sourceCount: true, status: true, licenseType: true, priceCents: true,
+          monthlyPriceCents: true, annualPriceCents: true, createdAt: true,
           tags: true,
         },
       });
@@ -368,7 +369,8 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
       return res.json({
         products: products.map((product) => ({
           id: product.id, title: product.title, category: product.category,
-          qualityScore: product.qualityScore, sourceCount: product.sourceCount, priceCents: product.priceCents, licenseType: product.licenseType.toLowerCase(),
+          qualityScore: product.qualityScore, sourceCount: product.sourceCount, priceCents: product.priceCents,
+          monthlyPriceCents: product.monthlyPriceCents, annualPriceCents: product.annualPriceCents, licenseType: product.licenseType.toLowerCase(),
           recordCount: product.tags.filter((tag) => tag.startsWith('source-record-id:')).length,
           status: product.status.toLowerCase(),
           licenseStatus: readTag(product.tags, 'license-review-status:') || 'pending',
@@ -538,14 +540,18 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
     if (!['seller', 'admin'].includes(user.role)) return res.status(403).json({ error: 'A seller or admin account is required.' });
 
     const schema = z.object({
-      priceCents: z.number().int().min(100).max(10_000_000),
+      priceCents: z.number().int().min(0).max(10_000_000),
+      monthlyPriceCents: z.number().int().min(100).max(100_000_000).nullable().optional(),
+      annualPriceCents: z.number().int().min(100).max(100_000_000).nullable().optional(),
       licenseType: z.enum(['COMMERCIAL', 'PERSONAL', 'ENTERPRISE']),
       rightsConfirmed: z.literal(true),
       attestationNote: z.string().trim().min(20).max(1000),
+    }).refine((value) => value.priceCents > 0 || Boolean(value.monthlyPriceCents) || Boolean(value.annualPriceCents), {
+      message: 'Set a one-time price or at least one recurring price.',
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ error: 'Enter a price of at least $1, choose a license, and confirm the seller rights attestation.' });
+      return res.status(400).json({ error: 'Set a one-time price or recurring price, choose a license, and confirm the seller rights attestation.' });
     }
 
     try {
@@ -614,6 +620,8 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
           where: { id: product.id },
           data: {
             priceCents: parsed.data.priceCents,
+            monthlyPriceCents: parsed.data.monthlyPriceCents ?? null,
+            annualPriceCents: parsed.data.annualPriceCents ?? null,
             licenseType: parsed.data.licenseType,
             status: 'PUBLISHED',
             tags: attestationTags,
@@ -627,6 +635,8 @@ export function createDataBankRouter(prisma: PrismaClient, auth: express.Request
         productId: product.id,
         status: 'published',
         priceCents: parsed.data.priceCents,
+        monthlyPriceCents: parsed.data.monthlyPriceCents ?? null,
+        annualPriceCents: parsed.data.annualPriceCents ?? null,
         licenseType: parsed.data.licenseType.toLowerCase(),
         listing: { id: listing.id, slug: listing.slug },
         note: 'The seller attestation and evidence reference were recorded. This is not a legal determination of redistribution rights.',
