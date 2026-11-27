@@ -14,6 +14,8 @@ type Dataset = {
   title: string;
   category: string;
   priceCents: number;
+  monthlyPriceCents?: number | null;
+  annualPriceCents?: number | null;
   qualityScore: number;
   status: string;
   tags: string[];
@@ -412,6 +414,49 @@ function OverviewTab({ user, wallet, formatMoney }: { user?: User | null; wallet
   );
 }
 
+
+function RecurringPriceEditor({ dataset }: { dataset: Dataset }) {
+  const [monthly, setMonthly] = useState(dataset.monthlyPriceCents ? String(dataset.monthlyPriceCents / 100) : '');
+  const [annual, setAnnual] = useState(dataset.annualPriceCents ? String(dataset.annualPriceCents / 100) : '');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const save = async () => {
+    const parse = (value: string) => value.trim() === '' ? null : Math.round(Number(value) * 100);
+    const monthlyCents = parse(monthly);
+    const annualCents = parse(annual);
+    if ([monthlyCents, annualCents].some((value) => value !== null && (!Number.isInteger(value) || value < 100 || value > 100000000)) ||
+        (monthlyCents === null && annualCents === null)) {
+      setMessage('Enter at least one price of $1 or more.');
+      return;
+    }
+    setSaving(true);
+    setMessage('');
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${API}/datasets/${encodeURIComponent(dataset.id)}/recurring-pricing`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token || ''}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monthlyPriceCents: monthlyCents, annualPriceCents: annualCents }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.formErrors?.[0] || data.error || 'Could not save recurring prices.');
+      setMessage('Saved. Still requires rights review and publication.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not save recurring prices.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div style={{ minWidth: 190, display: 'grid', gap: 6 }}>
+      <input aria-label={`Monthly price for ${dataset.title}`} type="number" min="1" step="0.01" placeholder="Monthly $" value={monthly} onChange={(event) => setMonthly(event.target.value)} style={{ width: '100%', padding: 6 }} />
+      <input aria-label={`Annual price for ${dataset.title}`} type="number" min="1" step="0.01" placeholder="Annual $" value={annual} onChange={(event) => setAnnual(event.target.value)} style={{ width: '100%', padding: 6 }} />
+      <button type="button" className="secondary-button" disabled={saving || !['draft', 'review'].includes(dataset.status.toLowerCase())} onClick={() => void save()}>{saving ? 'Saving…' : 'Save recurring prices'}</button>
+      {message && <small role="status">{message}</small>}
+    </div>
+  );
+}
+
 function DatasetsTab({ formatMoney }: { formatMoney: (cents: number) => string }) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -456,15 +501,18 @@ function DatasetsTab({ formatMoney }: { formatMoney: (cents: number) => string }
       ) : (
         <div className="table-container">
           <table>
-            <thead><tr><th>Title</th><th>Category</th><th>Price</th><th>Quality</th><th>Status</th></tr></thead>
+            <thead><tr><th>Title</th><th>Category</th><th>Price</th><th>Monthly</th><th>Annual</th><th>Quality</th><th>Status</th><th>Recurring prices</th></tr></thead>
             <tbody>
               {datasets.map((dataset) => (
                 <tr key={dataset.id}>
                   <td style={{ fontWeight: 600 }}>{dataset.title}</td>
                   <td>{dataset.category}</td>
                   <td>{formatMoney(dataset.priceCents)}</td>
+                  <td>{dataset.monthlyPriceCents ? formatMoney(dataset.monthlyPriceCents) : '—'}</td>
+                  <td>{dataset.annualPriceCents ? formatMoney(dataset.annualPriceCents) : '—'}</td>
                   <td>{dataset.qualityScore}/100</td>
                   <td><span className={`badge ${dataset.status.toLowerCase()}`}>{dataset.status}</span></td>
+                  <td><RecurringPriceEditor dataset={dataset} /></td>
                 </tr>
               ))}
             </tbody>
