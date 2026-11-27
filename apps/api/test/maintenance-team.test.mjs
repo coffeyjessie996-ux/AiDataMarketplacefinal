@@ -35,6 +35,6 @@ test('maintenance investigator classifies failures without retrying tasks', () =
 });
 
 test('maintenance cron endpoint has a per-IP request limit', () => {
-  assert.match(cron, /allowMaintenanceRequest\(req\.ip\)/);
+  assert.match(cron, /allowMaintenanceRequest\(req\.ip \?\? 'unknown'\)/);
   assert.match(cron, /status\(429\)/);
 });
