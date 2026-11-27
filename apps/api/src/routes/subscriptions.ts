@@ -88,25 +88,18 @@ export function createSubscriptionsRouter(
         return res.status(409).json({ error: 'The approved forecast records are not complete for delivery.' });
       }
 
-      const existing = await prisma.marketplaceSubscription.findFirst({
-        where: { buyerId: req.user.id, datasetId: dataset.id, status: { in: ['ACTIVE', 'TRIALING', 'INCOMPLETE'] } },
-        orderBy: { createdAt: 'desc' },
+      const existingActive = await prisma.marketplaceSubscription.findFirst({
+        where: { buyerId: req.user.id, datasetId: dataset.id, status: { in: ['ACTIVE', 'TRIALING'] } },
       });
-      if (existing && ['ACTIVE', 'TRIALING'].includes(existing.status)) {
-        return res.status(409).json({ error: 'You already have an active subscription to this dataset.' });
-      }
-      const subscriptionRecord = existing ?? await prisma.marketplaceSubscription.create({
+      if (existingActive) return res.status(409).json({ error: 'You already have an active subscription to this dataset.' });
+      // Each checkout attempt gets a fresh local record and Stripe idempotency key.
+      // This avoids reusing an expired/cancelled Checkout URL after a buyer retries.
+      const subscriptionRecord = await prisma.marketplaceSubscription.create({
         data: {
           buyerId: req.user.id, datasetId: dataset.id, billingInterval: parsed.data.interval,
           unitAmountCents: amountCents, currency: 'USD', status: 'INCOMPLETE',
         },
       });
-      if (existing) {
-        await prisma.marketplaceSubscription.update({
-          where: { id: existing.id },
-          data: { billingInterval: parsed.data.interval, unitAmountCents: amountCents, status: 'INCOMPLETE' },
-        });
-      }
       const baseUrl = (process.env.FRONTEND_URL || 'https://aidatamarketplacefinal.vercel.app').replace(/\/$/, '');
       const session = await stripe.checkout.sessions.create({
         mode: 'subscription',
