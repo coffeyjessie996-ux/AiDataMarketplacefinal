@@ -5,7 +5,7 @@ import './operations.css';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
-type Maintenance = { checkedAt: string; policy: { staleTaskThresholdMinutes: number; automaticRepair: string; approvalRequiredFor: string[] }; incidents: { staleRunningTasks: number; failedTasksLast24Hours: number }; recentRepairs: Array<{ id: string; taskName: string; status: string; message: string; startedAt: string; completedAt: string | null; recordsFetched: number }> };
+type Maintenance = { checkedAt: string; policy: { staleTaskThresholdMinutes: number; automaticRepair: string; approvalRequiredFor: string[] }; incidents: { staleRunningTasks: number; failedTasksLast24Hours: number }; failureDiagnostics: { windowHours: number; inspectedFailureCount: number; categories: Record<string, number>; recentFailures: Array<{ id: string; agentName: string; taskName: string; message: string; category: string; recommendedAction: string; startedAt: string }> }; recentRepairs: Array<{ id: string; taskName: string; status: string; message: string; startedAt: string; completedAt: string | null; recordsFetched: number }> };
 
 type Health = {
   updatedAt: string;
@@ -96,6 +96,13 @@ export default function OperationsPage() {
                 <Metric label="Maintenance actions" value={maintenance.recentRepairs.length} detail="Recent recorded maintenance runs" />
               </div>
               <p className="mt-3 text-xs text-slate-400">{maintenance.policy.automaticRepair}</p>
+              <div className="mt-5">
+                <h3 className="mb-2 font-semibold">Investigator · failure patterns ({maintenance.failureDiagnostics.windowHours}h)</h3>
+                <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                  {Object.entries(maintenance.failureDiagnostics.categories).map(([category, count]) => <div key={category} className="rounded-lg border border-slate-800 p-3"><p className="text-xs capitalize text-slate-400">{category.replaceAll('_', ' ')}</p><p className="text-xl font-semibold">{count}</p></div>)}
+                </div>
+                {maintenance.failureDiagnostics.recentFailures.length > 0 ? <div className="mt-3 space-y-3">{maintenance.failureDiagnostics.recentFailures.slice(0,8).map(failure => <article key={failure.id} className="rounded-lg border border-slate-800 p-3"><p className="text-sm font-medium">{failure.agentName} · {failure.category.replaceAll('_', ' ')}</p><p className="text-xs text-slate-400">{failure.taskName} · {date(failure.startedAt)}</p><p className="mt-1 text-sm text-slate-300">{failure.message}</p><p className="mt-1 text-xs text-cyan-200">Suggested next step: {failure.recommendedAction}</p></article>)}</div> : <p className="mt-3 text-sm text-slate-400">No failed agent runs found in this window.</p>}
+              </div>
               <p className="mt-1 text-xs text-slate-500">Approval remains required for: {maintenance.policy.approvalRequiredFor.join(', ')}.</p>
               {maintenance.recentRepairs.length > 0 && <div className="mt-4 space-y-2">{maintenance.recentRepairs.slice(0,5).map(run => <article key={run.id} className="border-b border-slate-800 pb-2"><p className="text-sm font-medium">{run.taskName} · {run.status}</p><p className="text-xs text-slate-400">{date(run.startedAt)} · {run.message}</p></article>)}</div>}
             </> : <p className="mt-4 text-sm text-slate-400">Maintenance status is unavailable for this account.</p>}
