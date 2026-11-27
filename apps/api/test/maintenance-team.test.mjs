@@ -27,3 +27,14 @@ test('scheduled maintenance is protected by CRON_SECRET', () => {
   assert.match(dashboard, /AI Maintenance Team/);
   assert.match(dashboard, /Run maintenance check/);
 });
+
+test('maintenance investigator classifies failures without retrying tasks', () => {
+  assert.match(service, /classifyMaintenanceFailure/);
+  assert.match(service, /inspectRecentMaintenanceFailures/);
+  assert.match(route, /failureDiagnostics/);
+});
+
+test('maintenance cron endpoint has a per-IP request limit', () => {
+  assert.match(cron, /allowMaintenanceRequest\(req\.ip\)/);
+  assert.match(cron, /status\(429\)/);
+});
