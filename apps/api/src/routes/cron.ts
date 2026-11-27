@@ -493,7 +493,7 @@ export function createCronRouter(prisma: PrismaClient) {
     const secret = process.env.CRON_SECRET;
     if (!secret) return res.status(503).json({ error: 'Scheduled maintenance is not configured: CRON_SECRET is missing.' });
     if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized maintenance request.' });
-    if (!allowMaintenanceRequest(req.ip)) return res.status(429).json({ error: 'Maintenance request rate limit exceeded. Try again later.' });
+    if (!allowMaintenanceRequest(req.ip ?? 'unknown')) return res.status(429).json({ error: 'Maintenance request rate limit exceeded. Try again later.' });
     try {
       const result = await reconcileStaleAgentTasks(prisma);
       return res.json({ ok: true, team: 'Marketplace Maintenance Team', ...result });
