@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import type { PrismaClient } from '@prisma/client';
 import type { User } from '../types';
 import { isApprovedNwsForecastRecord, isCommercialReuseApproved } from '../services/source-rights';
+import { z } from 'zod';
 
 type AuthReq = express.Request & { user?: User };
 
@@ -11,7 +12,6 @@ const checkoutSchema = z.object({
   interval: z.enum(['month', 'year']),
 });
 
-import { z } from 'zod';
 
 function periodEnd(subscription: Stripe.Subscription): Date | null {
   const seconds = (subscription as Stripe.Subscription & { current_period_end?: number }).current_period_end;
@@ -137,6 +137,36 @@ export function createSubscriptionsRouter(
     }
   });
 
+
+  router.get('/checkout-session/:sessionId', auth, async (req: AuthReq, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+    const sessionId = String(req.params.sessionId || '');
+    if (!/^cs_(live|test)_[A-Za-z0-9]+$/.test(sessionId)) return res.status(400).json({ error: 'Invalid Checkout session reference.' });
+    const stripe = getStripe();
+    if (!stripe) return res.status(503).json({ error: 'Stripe is not configured.' });
+    try {
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const recordId = session.metadata?.marketplaceSubscriptionId;
+      if (session.mode !== 'subscription' || session.metadata?.buyerId !== req.user.id || !recordId ||
+          session.client_reference_id !== recordId) {
+        return res.status(404).json({ error: 'Subscription Checkout session not found for this account.' });
+      }
+      const item = await prisma.marketplaceSubscription.findFirst({
+        where: { id: recordId, buyerId: req.user.id },
+        include: { dataset: { select: { title: true } } },
+      });
+      if (!item || session.metadata?.datasetId !== item.datasetId) return res.status(404).json({ error: 'Subscription not found.' });
+      return res.json({
+        subscriptionId: item.id, datasetTitle: item.dataset.title, status: item.status.toLowerCase(),
+        interval: item.billingInterval, amountCents: item.unitAmountCents,
+        currentPeriodEnd: item.currentPeriodEnd?.toISOString() ?? null,
+      });
+    } catch (error) {
+      console.error('Subscription Checkout lookup failed', error);
+      return res.status(502).json({ error: 'Unable to verify subscription status right now.' });
+    }
+  });
+
   router.post('/:id/portal', auth, async (req: AuthReq, res) => {
     if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
     const stripe = getStripe();
@@ -220,10 +250,8 @@ export async function processSubscriptionWebhook(
     if (!recordId || !subscriptionId || !session.customer) throw new Error('Subscription Checkout session is missing its references.');
     const stored = await prisma.marketplaceSubscription.findUnique({ where: { id: recordId } });
     if (!stored || stored.buyerId !== session.metadata?.buyerId || stored.datasetId !== session.metadata?.datasetId ||
-        session.client_reference_id !== stored.id || session.amount_total !== null) {
-      // Subscription Checkout totals can be null; metadata and ownership are the binding checks.
-      if (!stored || stored.buyerId !== session.metadata?.buyerId || stored.datasetId !== session.metadata?.datasetId ||
-          session.client_reference_id !== stored.id) throw new Error('Subscription Checkout session does not match the stored subscription.');
+        session.client_reference_id !== stored.id) {
+      throw new Error('Subscription Checkout session does not match the stored subscription.');
     }
     const remote = await stripe.subscriptions.retrieve(subscriptionId);
     await prisma.marketplaceSubscription.update({
