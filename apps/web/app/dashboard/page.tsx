@@ -416,56 +416,6 @@ function OverviewTab({ user, wallet, formatMoney }: { user?: User | null; wallet
 
 
 
-function NwsRightsReview({ dataset }: { dataset: Dataset }) {
-  const [confirmed, setConfirmed] = useState(false);
-  const [note, setNote] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const alreadyReviewed = dataset.tags.includes('license-review-status:seller_reviewed');
-  const submit = async () => {
-    if (!confirmed || note.trim().length < 30) {
-      setMessage('Read the NWS terms, check the confirmation, and enter a review note (at least 30 characters).');
-      return;
-    }
-    setSaving(true);
-    setMessage('');
-    try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${API}/datasets/${encodeURIComponent(dataset.id)}/source-rights-review`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token || ''}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmNwsCommercialReuse: true, evidenceNote: note }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || 'Unable to record the review.');
-      setMessage('Seller review saved. Dataset is still a draft and is not for sale.');
-      setConfirmed(false);
-      setNote('');
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Unable to record the review.');
-    } finally {
-      setSaving(false);
-    }
-  };
-  return (
-    <div style={{ minWidth: 240, display: 'grid', gap: 7 }}>
-      {alreadyReviewed ? <small style={{ color: '#86efac' }}>Seller review recorded</small> : (
-        <>
-          <a href="https://www.weather.gov/documentation/services-web-api" target="_blank" rel="noreferrer">Read NWS API terms</a>
-          <small style={{ color: '#94a3b8' }}>Only NWS-issued point/grid forecasts are in scope. Exclude third-party station observations, imagery, and non-NWS material. Include source attribution, forecast issue/valid times, and the non-endorsement notice.</small>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-            <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-            <span>I reviewed the source terms and confirm this dataset contains only permitted NWS forecast material, with required attribution and no third-party content.</span>
-          </label>
-          <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} placeholder="Record what you checked and how third-party content was excluded." style={{ width: '100%', padding: 8 }} />
-          <button type="button" className="secondary-button" disabled={saving} onClick={() => void submit()}>{saving ? 'Saving review…' : 'Record my source-rights review'}</button>
-        </>
-      )}
-      {message && <small role="status">{message}</small>}
-    </div>
-  );
-}
-
 function RecurringPriceEditor({ dataset }: { dataset: Dataset }) {
   const [monthly, setMonthly] = useState(dataset.monthlyPriceCents ? String(dataset.monthlyPriceCents / 100) : '');
   const [annual, setAnnual] = useState(dataset.annualPriceCents ? String(dataset.annualPriceCents / 100) : '');
@@ -552,7 +502,7 @@ function DatasetsTab({ formatMoney }: { formatMoney: (cents: number) => string }
       ) : (
         <div className="table-container">
           <table>
-            <thead><tr><th>Title</th><th>Category</th><th>Price</th><th>Monthly</th><th>Annual</th><th>Quality</th><th>Status</th><th>Recurring prices</th><th>Source-rights review</th></tr></thead>
+            <thead><tr><th>Title</th><th>Category</th><th>Price</th><th>Monthly</th><th>Annual</th><th>Quality</th><th>Status</th><th>Recurring prices</th></tr></thead>
             <tbody>
               {datasets.map((dataset) => (
                 <tr key={dataset.id}>
@@ -564,7 +514,6 @@ function DatasetsTab({ formatMoney }: { formatMoney: (cents: number) => string }
                   <td>{dataset.qualityScore}/100</td>
                   <td><span className={`badge ${dataset.status.toLowerCase()}`}>{dataset.status}</span></td>
                   <td><RecurringPriceEditor dataset={dataset} /></td>
-                  <td>{dataset.tags.includes('source:nws_api_forecasts') ? <NwsRightsReview dataset={dataset} /> : <span style={{ color: '#94a3b8' }}>Separate review required</span>}</td>
                 </tr>
               ))}
             </tbody>

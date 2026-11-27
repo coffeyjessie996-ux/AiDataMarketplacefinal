@@ -15,9 +15,9 @@ type ResearchRecord = {
   quality: { populatedFieldCount: number; hasSupplierName: boolean; hasSourceLink: boolean; classification: string };
 };
 
-type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; priceCents: number; licenseType: string; licenseStatus: string; licenseReviewNote: string; licenseEvidenceUrl: string; licenseReviewedAt: string | null; sellerRightsConfirmed: boolean; sellerRightsAttestationNote: string; createdAt: string };
+type SavedProduct = { id: string; title: string; category: string; qualityScore: number; sourceCount: number; recordCount: number; status: string; priceCents: number; monthlyPriceCents: number | null; annualPriceCents: number | null; licenseType: string; licenseStatus: string; licenseReviewNote: string; licenseEvidenceUrl: string; licenseReviewedAt: string | null; sellerRightsConfirmed: boolean; sellerRightsAttestationNote: string; createdAt: string };
 type ReviewDraft = { status: 'pending' | 'seller_reviewed' | 'blocked'; note: string; evidenceUrl: string };
-type PublishDraft = { priceUsd: string; licenseType: 'COMMERCIAL' | 'PERSONAL' | 'ENTERPRISE'; rightsConfirmed: boolean; attestationNote: string };
+type PublishDraft = { priceUsd: string; monthlyPriceUsd: string; annualPriceUsd: string; licenseType: 'COMMERCIAL' | 'PERSONAL' | 'ENTERPRISE'; rightsConfirmed: boolean; attestationNote: string };
 
 type CreatedProduct = {
   id: string;
@@ -158,7 +158,9 @@ export default function ProductFactoryPage() {
     setPublishDrafts(current => ({
       ...current,
       [id]: {
-        priceUsd: current[id]?.priceUsd ?? (item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : item.sellerRightsAttestationNote.includes('$4.99') ? '4.99' : ''),
+        priceUsd: current[id]?.priceUsd ?? (item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : ''),
+        monthlyPriceUsd: current[id]?.monthlyPriceUsd ?? (item.monthlyPriceCents ? (item.monthlyPriceCents / 100).toFixed(2) : ''),
+        annualPriceUsd: current[id]?.annualPriceUsd ?? (item.annualPriceCents ? (item.annualPriceCents / 100).toFixed(2) : ''),
         licenseType: current[id]?.licenseType ?? defaultPublishLicense(item),
         rightsConfirmed: current[id]?.rightsConfirmed ?? item.sellerRightsConfirmed,
         attestationNote: current[id]?.attestationNote ?? item.sellerRightsAttestationNote,
@@ -169,14 +171,20 @@ export default function ProductFactoryPage() {
 
   const publishProduct = async (item: SavedProduct) => {
     const draft = publishDrafts[item.id] ?? {
-      priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : item.sellerRightsAttestationNote.includes('$4.99') ? '4.99' : '',
+      priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : '',
+      monthlyPriceUsd: item.monthlyPriceCents ? (item.monthlyPriceCents / 100).toFixed(2) : '',
+      annualPriceUsd: item.annualPriceCents ? (item.annualPriceCents / 100).toFixed(2) : '',
       licenseType: defaultPublishLicense(item),
       rightsConfirmed: item.sellerRightsConfirmed,
       attestationNote: item.sellerRightsAttestationNote,
     };
-    const price = Number(draft.priceUsd);
-    if (!Number.isFinite(price) || price < 1 || price > 100000) {
-      setError('Enter a listing price between $1 and $100,000.');
+    const price = draft.priceUsd.trim() === '' ? 0 : Number(draft.priceUsd);
+    const monthlyPrice = draft.monthlyPriceUsd.trim() === '' ? null : Number(draft.monthlyPriceUsd);
+    const annualPrice = draft.annualPriceUsd.trim() === '' ? null : Number(draft.annualPriceUsd);
+    const validRecurring = [monthlyPrice, annualPrice].every(value => value === null || (Number.isFinite(value) && value >= 1 && value <= 100000));
+    if (!Number.isFinite(price) || price < 0 || price > 100000 || !validRecurring ||
+        (price < 1 && monthlyPrice === null && annualPrice === null)) {
+      setError('Enter a one-time price or at least one recurring price between $1 and $100,000.');
       return;
     }
     if (item.licenseStatus !== 'seller_reviewed' || !item.licenseEvidenceUrl) {
@@ -197,6 +205,8 @@ export default function ProductFactoryPage() {
         headers: headers(),
         body: JSON.stringify({
           priceCents: Math.round(price * 100),
+          monthlyPriceCents: monthlyPrice === null ? null : Math.round(monthlyPrice * 100),
+          annualPriceCents: annualPrice === null ? null : Math.round(annualPrice * 100),
           licenseType: draft.licenseType,
           rightsConfirmed: draft.rightsConfirmed,
           attestationNote: draft.attestationNote,
@@ -208,9 +218,11 @@ export default function ProductFactoryPage() {
         ...product,
         status: 'published',
         priceCents: data.priceCents,
+        monthlyPriceCents: data.monthlyPriceCents,
+        annualPriceCents: data.annualPriceCents,
         licenseType: data.licenseType,
       } : product));
-      setNotice(`Published ${item.title} at ${(data.priceCents / 100).toFixed(2)}. Listing slug: ${data.listing.slug}. Checkout remains subject to the platform payment switch.`);
+      setNotice(`Published ${item.title}. One-time: ${data.priceCents > 0 ? `${(data.priceCents / 100).toFixed(2)}` : 'off'}; monthly: ${data.monthlyPriceCents ? `${(data.monthlyPriceCents / 100).toFixed(2)}` : 'off'}; annual: ${data.annualPriceCents ? `${(data.annualPriceCents / 100).toFixed(2)}` : 'off'}. Listing: ${data.listing.slug}.`);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not publish this product.');
@@ -314,7 +326,9 @@ export default function ProductFactoryPage() {
                       <p style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.5 }}>Only publish after you have checked the source terms and confirmed you have the rights to offer this dataset. Your confirmation is recorded with the listing.</p>
                       {(() => {
                         const publishDraft = publishDrafts[item.id] ?? {
-                          priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : item.sellerRightsAttestationNote.includes('$4.99') ? '4.99' : '',
+                          priceUsd: item.priceCents > 0 ? (item.priceCents / 100).toFixed(2) : '',
+                          monthlyPriceUsd: item.monthlyPriceCents ? (item.monthlyPriceCents / 100).toFixed(2) : '',
+                          annualPriceUsd: item.annualPriceCents ? (item.annualPriceCents / 100).toFixed(2) : '',
                           licenseType: defaultPublishLicense(item),
                           rightsConfirmed: item.sellerRightsConfirmed,
                           attestationNote: item.sellerRightsAttestationNote,
@@ -324,6 +338,12 @@ export default function ProductFactoryPage() {
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8 }}>
                               <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>Price (USD)
                                 <input type="number" min="1" max="100000" step="0.01" value={publishDraft.priceUsd} onChange={event => updatePublishDraft(item.id, { priceUsd: event.target.value }, item)} placeholder="e.g. 29.00" style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }} />
+                              </label>
+                              <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>Monthly subscription (USD, optional)
+                                <input type="number" min="1" max="100000" step="0.01" value={publishDraft.monthlyPriceUsd} onChange={event => updatePublishDraft(item.id, { monthlyPriceUsd: event.target.value }, item)} placeholder="e.g. 29.00 / month" style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }} />
+                              </label>
+                              <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>Annual subscription (USD, optional)
+                                <input type="number" min="1" max="100000" step="0.01" value={publishDraft.annualPriceUsd} onChange={event => updatePublishDraft(item.id, { annualPriceUsd: event.target.value }, item)} placeholder="e.g. 299.00 / year" style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }} />
                               </label>
                               <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>Buyer license
                                 <select value={publishDraft.licenseType} onChange={event => updatePublishDraft(item.id, { licenseType: event.target.value as PublishDraft['licenseType'] }, item)} style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }}>
@@ -340,7 +360,7 @@ export default function ProductFactoryPage() {
                             <label style={{ display: 'grid', gap: 4, fontSize: 12, marginTop: 8 }}>Seller rights attestation note
                               <textarea value={publishDraft.attestationNote} onChange={event => updatePublishDraft(item.id, { attestationNote: event.target.value }, item)} minLength={20} maxLength={1000} rows={2} placeholder="Describe the source-rights basis you checked and any limits that apply." style={{ padding: 9, borderRadius: 6, background: '#0b1220', color: 'white', border: '1px solid #475569' }} />
                             </label>
-                            <button type="button" onClick={() => void publishProduct(item)} disabled={publishingProduct === item.id || item.licenseStatus !== 'seller_reviewed' || !item.licenseEvidenceUrl || !publishDraft.rightsConfirmed || publishDraft.attestationNote.trim().length < 20 || Number(publishDraft.priceUsd) < 1} style={{ padding: '9px 14px', borderRadius: 6, background: '#047857', color: 'white', border: 0, marginTop: 10 }}>
+                            <button type="button" onClick={() => void publishProduct(item)} disabled={publishingProduct === item.id || item.licenseStatus !== 'seller_reviewed' || !item.licenseEvidenceUrl || !publishDraft.rightsConfirmed || publishDraft.attestationNote.trim().length < 20 || !(Number(publishDraft.priceUsd) >= 1 || Number(publishDraft.monthlyPriceUsd) >= 1 || Number(publishDraft.annualPriceUsd) >= 1)} style={{ padding: '9px 14px', borderRadius: 6, background: '#047857', color: 'white', border: 0, marginTop: 10 }}>
                               {publishingProduct === item.id ? 'Publishing…' : 'Publish listing'}
                             </button>
                             {item.licenseStatus !== 'seller_reviewed' && <p style={{ color: '#fbbf24', fontSize: 11, marginTop: 8 }}>Save the source review as “Seller reviewed” and include an HTTPS evidence URL first.</p>}
