@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { finishAgentTask, startAgentTask } from '../services/agent-activity';
+import { reconcileStaleAgentTasks } from '../services/maintenance';
 import { upsertResearchRecordPreservingAnalysis } from '../services/research-records';
 
 const SOURCE_URL = 'https://api.usaspending.gov/api/v2/search/spending_by_award/';
@@ -461,6 +462,22 @@ export function createCronRouter(prisma: PrismaClient) {
       await finishAgentTask(prisma, taskId, 'FAILED', { message: 'Grants.gov collection failed before completion.' });
       console.error('Scheduled Grants.gov refresh failed', error);
       return res.status(502).json({ error: 'Scheduled Grants.gov opportunity refresh failed.' });
+    }
+  });
+
+
+  // Every 15 minutes, safely reconcile agent runs that have been stuck for over
+  // two hours. This never reruns a scraper or touches marketplace/customer/payment data.
+  router.get('/maintenance/reconcile', async (req, res) => {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(503).json({ error: 'Maintenance schedule is not configured: CRON_SECRET is missing.' });
+    if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized maintenance request.' });
+    try {
+      const result = await reconcileStaleAgentTasks(prisma);
+      return res.json({ ok: true, team: 'Marketplace Maintenance Team', ...result });
+    } catch (error) {
+      console.error('Scheduled maintenance reconciliation failed', error);
+      return res.status(500).json({ error: 'Scheduled maintenance reconciliation failed safely.' });
     }
   });
 
