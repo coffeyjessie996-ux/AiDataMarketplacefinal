@@ -23,6 +23,7 @@ model User {
   payouts       Payout[]
   orders        Order[]
   marketplaceSubscriptions MarketplaceSubscription[]
+  datasetRightsReviews DatasetRightsReview[]
   assignedLeads Lead[]
   auctionBids  AuctionBid[]
   gmailConnection GmailConnection?
@@ -63,6 +64,7 @@ model Dataset {
   listings     Listing[]
   orders       Order[]
   marketplaceSubscriptions MarketplaceSubscription[]
+  rightsReviews DatasetRightsReview[]
   auctions     Auction[]
 }
 
@@ -419,4 +421,20 @@ model MarketplaceSubscription {
 
   @@index([buyerId, status])
   @@index([datasetId, status])
+}
+
+
+model DatasetRightsReview {
+  id           String   @id @default(cuid())
+  datasetId    String
+  dataset      Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  sellerId     String
+  seller       User     @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  source       String
+  termsUrl     String
+  evidenceNote String
+  reviewedAt   DateTime @default(now())
+
+  @@index([datasetId, reviewedAt])
+  @@index([sellerId, reviewedAt])
 }
