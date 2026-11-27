@@ -466,11 +466,11 @@ export function createCronRouter(prisma: PrismaClient) {
   });
 
 
-  // Every 15 minutes, safely reconcile agent runs that have been stuck for over
-  // two hours. This never reruns a scraper or touches marketplace/customer/payment data.
+  // Daily, safely reconcile agent runs that have been stuck for over two hours.
+  // This never reruns a scraper or touches marketplace/customer/payment data.
   router.get('/maintenance/reconcile', async (req, res) => {
     const secret = process.env.CRON_SECRET;
-    if (!secret) return res.status(503).json({ error: 'Maintenance schedule is not configured: CRON_SECRET is missing.' });
+    if (!secret) return res.status(503).json({ error: 'Scheduled maintenance is not configured: CRON_SECRET is missing.' });
     if (!authorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Unauthorized maintenance request.' });
     try {
       const result = await reconcileStaleAgentTasks(prisma);
