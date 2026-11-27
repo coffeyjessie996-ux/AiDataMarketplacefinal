@@ -20,6 +20,7 @@ import { createAiResearchAgentRouter } from './routes/ai-research-agent';
 import { createOperationsRouter } from './routes/operations';
 import { createAuctionsRouter } from './routes/auctions';
 import { createGmailRouter } from './routes/gmail';
+import { createSubscriptionsRouter, processSubscriptionWebhook } from './routes/subscriptions';
 import { finishAgentTask, startAgentTask } from './services/agent-activity';
 import { upsertResearchRecordPreservingAnalysis } from './services/research-records';
 import { isApprovedNwsForecastRecord, isCommercialReuseApproved } from './services/source-rights';
@@ -116,6 +117,8 @@ const serializeDataset = (dataset: {
   category: string;
   description: string;
   priceCents: number;
+  monthlyPriceCents: number | null;
+  annualPriceCents: number | null;
   qualityScore: number;
   licenseType: string;
   sourceCount: number;
@@ -130,6 +133,8 @@ const serializeDataset = (dataset: {
   category: dataset.category,
   description: dataset.description,
   priceCents: dataset.priceCents,
+  monthlyPriceCents: dataset.monthlyPriceCents,
+  annualPriceCents: dataset.annualPriceCents,
   qualityScore: dataset.qualityScore,
   licenseType: dataset.licenseType.toLowerCase(),
   sourceCount: dataset.sourceCount,
@@ -218,6 +223,7 @@ app.use('/agents', createAgentsRouter(prisma, requireAuth));
 app.use('/operations', createOperationsRouter(prisma, requireAuth));
 app.use('/auctions', createAuctionsRouter(prisma, requireAuth));
 app.use('/gmail', createGmailRouter(prisma, requireAuth));
+app.use('/subscriptions', createSubscriptionsRouter(prisma, requireAuth, () => stripeClient()));
 
 const registerSchema = z.object({
   name: z.string().min(2),
@@ -231,6 +237,8 @@ const datasetSchema = z.object({
   category: z.string().min(2),
   description: z.string().min(20),
   priceCents: z.number().int().positive(),
+  monthlyPriceCents: z.number().int().min(100).max(100000000).optional().nullable(),
+  annualPriceCents: z.number().int().min(100).max(100000000).optional().nullable(),
   qualityScore: z.number().int().min(0).max(100),
   licenseType: z
     .enum(['commercial', 'personal', 'enterprise', 'restricted'])
@@ -755,6 +763,33 @@ app.get('/datasets/:id', async (req, res) => {
   return res.json({ dataset: serializeDataset(dataset) });
 });
 
+
+app.patch('/datasets/:id/recurring-pricing', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
+  const parsed = z.object({
+    monthlyPriceCents: z.number().int().min(100).max(100000000).nullable(),
+    annualPriceCents: z.number().int().min(100).max(100000000).nullable(),
+  }).refine((value) => value.monthlyPriceCents !== null || value.annualPriceCents !== null, {
+    message: 'Set at least one recurring price.',
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const user = (req as express.Request & { user?: User }).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required.' });
+  try {
+    const dataset = await prisma.dataset.findUnique({ where: { id: String(req.params.id) } });
+    if (!dataset) return res.status(404).json({ error: 'Dataset not found.' });
+    if (user.role !== 'admin' && dataset.sellerId !== user.id) return res.status(403).json({ error: 'You can only set prices for your own dataset.' });
+    if (dataset.status !== 'DRAFT' && dataset.status !== 'REVIEW') return res.status(409).json({ error: 'Recurring prices can only be changed while the dataset is a draft or under review.' });
+    const updated = await prisma.dataset.update({
+      where: { id: dataset.id },
+      data: { monthlyPriceCents: parsed.data.monthlyPriceCents, annualPriceCents: parsed.data.annualPriceCents },
+    });
+    return res.json({ dataset: serializeDataset(updated), note: 'Recurring prices saved. This does not publish the dataset or approve source rights.' });
+  } catch (error) {
+    console.error('Recurring price update failed', error);
+    return res.status(500).json({ error: 'Unable to save recurring prices.' });
+  }
+});
+
 app.post('/datasets', requireAuth, requireRole(['seller', 'admin']), async (req, res) => {
   const parsed = datasetSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -771,6 +806,8 @@ app.post('/datasets', requireAuth, requireRole(['seller', 'admin']), async (req,
       category: parsed.data.category,
       description: parsed.data.description,
       priceCents: 0,
+      monthlyPriceCents: parsed.data.monthlyPriceCents ?? null,
+      annualPriceCents: parsed.data.annualPriceCents ?? null,
       qualityScore: parsed.data.qualityScore,
       licenseType: 'RESTRICTED',
       sourceCount: parsed.data.sourceCount,
@@ -1209,6 +1246,10 @@ app.post('/webhooks/stripe', async (req, res) => {
   }
 
   try {
+    if (event.type.startsWith('customer.subscription.') || event.type === 'invoice.paid' || event.type === 'invoice.payment_failed' || (event.type === 'checkout.session.completed' && (event.data.object as Stripe.Checkout.Session).mode === 'subscription')) {
+      await processSubscriptionWebhook(prisma, stripe, event);
+      return res.json({ received: true });
+    }
     const session = event.data.object as Stripe.Checkout.Session;
     if ([
       'checkout.session.completed',
