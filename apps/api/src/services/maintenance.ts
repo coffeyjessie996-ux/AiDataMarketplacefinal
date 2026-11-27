@@ -38,7 +38,6 @@ export async function reconcileStaleAgentTasks(prisma: PrismaClient, now = new D
   };
 }
 
-
 export type MaintenanceFailureCategory =
   | 'authentication'
   | 'rate_limited'
@@ -49,11 +48,11 @@ export type MaintenanceFailureCategory =
 
 export function classifyMaintenanceFailure(message: string | null): MaintenanceFailureCategory {
   const value = (message ?? '').toLowerCase();
-  if (/\\b(401|403)\\b|unauthori[sz]ed|credential|invalid api key/.test(value)) return 'authentication';
-  if (/\\b429\\b|rate.?limit|too many requests/.test(value)) return 'rate_limited';
+  if (/\b(401|403)\b|unauthori[sz]ed|credential|invalid api key/.test(value)) return 'authentication';
+  if (/\b429\b|rate.?limit|too many requests/.test(value)) return 'rate_limited';
   if (/timeout|timed out|etimedout|aborterror/.test(value)) return 'timeout';
   if (/database|prisma|postgres|connection refused|p1001|p1002/.test(value)) return 'database';
-  if (/\\b5\\d\\d\\b|upstream|service unavailable|bad gateway/.test(value)) return 'upstream';
+  if (/\b5\d\d\b|upstream|service unavailable|bad gateway/.test(value)) return 'upstream';
   return 'unknown';
 }
 
@@ -80,8 +79,8 @@ export async function inspectRecentMaintenanceFailures(prisma: PrismaClient, now
     const category = classifyMaintenanceFailure(failure.message);
     categories[category] += 1;
     const safeMessage = (failure.message ?? 'No failure detail recorded.')
-      .replace(/Bearer\\s+\\S+/gi, 'Bearer [redacted]')
-      .replace(/(api[_-]?key[\\\"'\\s:=]+)[^\\s,\\\"']+/gi, '$1[redacted]')
+      .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+      .replace(/(api[_-]?key["'\s:=]+)[^\s,"']+/gi, '$1[redacted]')
       .slice(0, 240);
     return { ...failure, message: safeMessage, category, recommendedAction: recommendations[category] };
   });
